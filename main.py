@@ -87,63 +87,56 @@ kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
 
-class PositionCapture:
-    """Installs WH_MOUSE_LL on a dedicated thread until a left-click or right-click."""
+DOT_SIZE = 30
 
-    def __init__(self, on_captured, on_canceled) -> None:
-        self._on_captured = on_captured
-        self._on_canceled = on_canceled
-        self._thread_id = 0
-        self._thread: threading.Thread | None = None
-        self._callback_ref = None
+class DraggableDot(tk.Toplevel):
+    """A semi-transparent, numbered, draggable dot that stays on top."""
+    def __init__(self, master, index, x, y, on_move):
+        super().__init__(master)
+        self.index = index  # 0-based index
+        self.on_move = on_move
+        
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.7)
+        
+        # Initialize position
+        self.update_position(x, y)
+        
+        # We use a canvas to draw a nice circle and number
+        self.canvas = tk.Canvas(self, width=DOT_SIZE, height=DOT_SIZE, highlightthickness=0, bg='white')
+        self.canvas.pack()
+        
+        # Make white background transparent
+        self.config(bg='white')
+        self.attributes("-transparentcolor", "white")
+        
+        # Draw the dot (blue circle with white outline)
+        self.circle = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#0078d7", outline="white", width=2)
+        self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Arial", 10, "bold"))
+        
+        self.canvas.bind("<Button-1>", self._on_start)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        
+    def update_position(self, x, y):
+        """Update window geometry based on center coordinate."""
+        self.geometry(f"{DOT_SIZE}x{DOT_SIZE}+{int(x - DOT_SIZE/2)}+{int(y - DOT_SIZE/2)}")
 
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+    def set_number(self, num):
+        """Update the displayed sequence number."""
+        self.canvas.itemconfig(self.text, text=str(num))
 
-    def cancel(self) -> None:
-        if self._thread_id:
-            user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
+    def _on_start(self, event):
+        self._drag_data = {"x": event.x, "y": event.y}
 
-    def _run(self) -> None:
-        self._thread_id = kernel32.GetCurrentThreadId()
-        state = {"done": False, "canceled": False, "x": 0, "y": 0}
-
-        def proc(n_code, w_param, l_param):
-            if n_code == HC_ACTION and not state["done"]:
-                if w_param == WM_LBUTTONDOWN:
-                    info = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT))[0]
-                    state["done"] = True
-                    state["x"] = info.pt.x
-                    state["y"] = info.pt.y
-                    user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
-                    return 1
-                if w_param == WM_RBUTTONDOWN:
-                    state["done"] = True
-                    state["canceled"] = True
-                    user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
-                    return 1
-            return user32.CallNextHookEx(None, n_code, w_param, l_param)
-
-        self._callback_ref = LowLevelMouseProc(proc)
-        hook = user32.SetWindowsHookExW(
-            WH_MOUSE_LL, self._callback_ref, kernel32.GetModuleHandleW(None), 0
-        )
-        if not hook:
-            self._on_canceled()
-            return
-
-        msg = wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            user32.TranslateMessage(ctypes.byref(msg))
-            user32.DispatchMessageW(ctypes.byref(msg))
-
-        user32.UnhookWindowsHookEx(hook)
-
-        if state["canceled"] or not state["done"]:
-            self._on_canceled()
-        else:
-            self._on_captured(state["x"], state["y"])
+    def _on_drag(self, event):
+        dx = event.x - self._drag_data["x"]
+        dy = event.y - self._drag_data["y"]
+        # winfo_x/y is top-left, we want center
+        new_x = self.winfo_x() + dx + DOT_SIZE//2
+        new_y = self.winfo_y() + dy + DOT_SIZE//2
+        self.update_position(new_x, new_y)
+        self.on_move(self.index, new_x, new_y)
 
 
 class ClickerApp:
@@ -154,12 +147,15 @@ class ClickerApp:
         self.root.resizable(False, False)
 
         self.interval_var = tk.StringVar(value="500")
+        self.step_delay_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready")
-        self._positions: list[tuple[int, int]] = []
+        
+        # List of dicts: {"x": int, "y": int, "delay": int|None, "dot": DraggableDot}
+        self._positions: list[dict] = []
+        
         self._stop_event = threading.Event()
         self._click_thread: threading.Thread | None = None
         self._escape_thread: threading.Thread | None = None
-        self._capture: PositionCapture | None = None
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -168,109 +164,141 @@ class ClickerApp:
         frame = ttk.Frame(self.root, padding=16)
         frame.grid(sticky="nsew")
 
-        ttk.Label(frame, text="Interval (ms)").grid(row=0, column=0, sticky="w")
+        # Row 0: Global Interval
+        ttk.Label(frame, text="Global Interval (ms)").grid(row=0, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.interval_var, width=12).grid(
             row=0, column=1, padx=(8, 0), sticky="w"
         )
 
-        ttk.Label(frame, text="Positions (clicked in order)").grid(
+        # Row 1: Position List Label
+        ttk.Label(frame, text="Click Order & Positions").grid(
             row=1, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
+        # Row 2: Listbox
         list_frame = ttk.Frame(frame)
         list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
         self.position_list = tk.Listbox(
-            list_frame, height=8, width=34, activestyle="dotbox"
+            list_frame, height=8, width=40, activestyle="dotbox"
         )
         self.position_list.grid(row=0, column=0)
+        self.position_list.bind("<<ListboxSelect>>", self._on_list_select)
+        
         scrollbar = ttk.Scrollbar(
             list_frame, orient="vertical", command=self.position_list.yview
         )
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.position_list.config(yscrollcommand=scrollbar.set)
 
-        edit_row = ttk.Frame(frame)
-        edit_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        self.capture_button = ttk.Button(
-            edit_row, text="Add by click", command=self.begin_capture
-        )
-        self.capture_button.grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(edit_row, text="Remove", command=self.remove_position).grid(
-            row=0, column=1, padx=6
-        )
-        ttk.Button(
-            edit_row, text="Up", width=4, command=lambda: self.move_position(-1)
-        ).grid(row=0, column=2, padx=(6, 0))
-        ttk.Button(
-            edit_row, text="Down", width=5, command=lambda: self.move_position(1)
-        ).grid(row=0, column=3, padx=(4, 0))
-        ttk.Button(edit_row, text="Clear", command=self.clear_positions).grid(
-            row=0, column=4, padx=(6, 0)
-        )
+        # Row 3: Selected Item Properties
+        prop_frame = ttk.LabelFrame(frame, text="Selected Position Properties", padding=8)
+        prop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        
+        ttk.Label(prop_frame, text="Wait after (ms):").grid(row=0, column=0, sticky="w")
+        ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=10).grid(row=0, column=1, padx=4)
+        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
+        ttk.Label(prop_frame, text="(Empty = use global interval)", font=("", 8), foreground="#666666").grid(row=1, column=0, columnspan=3, sticky="w")
 
+        # Row 4: Controls
+        edit_row = ttk.Frame(frame)
+        edit_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Button(edit_row, text="Add Dot", command=self.add_dot).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(edit_row, text="Remove", command=self.remove_position).grid(row=0, column=1, padx=6)
+        ttk.Button(edit_row, text="Up", width=4, command=lambda: self.move_position(-1)).grid(row=0, column=2, padx=(6, 0))
+        ttk.Button(edit_row, text="Down", width=5, command=lambda: self.move_position(1)).grid(row=0, column=3, padx=(4, 0))
+        ttk.Button(edit_row, text="Clear", command=self.clear_positions).grid(row=0, column=4, padx=(6, 0))
+
+        # Row 5: Run controls
         run_row = ttk.Frame(frame)
-        run_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        self.start_button = ttk.Button(
-            run_row, text="Start", command=self.start_clicking
-        )
+        run_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.start_button = ttk.Button(run_row, text="Start Loop", command=self.start_clicking)
         self.start_button.grid(row=0, column=0, padx=(0, 8))
-        self.stop_button = ttk.Button(
-            run_row, text="Stop", command=self.stop_clicking, state="disabled"
-        )
+        self.stop_button = ttk.Button(run_row, text="Stop", command=self.stop_clicking, state="disabled")
         self.stop_button.grid(row=0, column=1)
 
-        ttk.Label(frame, textvariable=self.status_var, foreground="#333333").grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(12, 0)
+        # Row 6: Status
+        ttk.Label(frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=(12, 0)
         )
         ttk.Label(
             frame,
-            text="Left-click captures a position. Right-click cancels capture. Esc stops clicking.",
+            text="Drag dots to set positions. Press Esc to stop clicking.",
             foreground="#666666",
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-    def begin_capture(self) -> None:
-        if self._capture is not None:
-            return
-        self.capture_button.config(state="disabled")
-        self.start_button.config(state="disabled")
-        self.status_var.set("Left-click to capture, right-click or Esc to cancel.")
-        self.root.bind_all("<Escape>", self._cancel_capture)
-        self._capture = PositionCapture(
-            on_captured=self._on_position_captured,
-            on_canceled=self._on_capture_canceled,
-        )
-        self._capture.start()
-
-    def _cancel_capture(self, _event=None) -> None:
-        if self._capture is not None:
-            self._capture.cancel()
-
-    def _on_position_captured(self, x: int, y: int) -> None:
-        self.root.after(0, lambda: self._apply_captured(x, y))
-
-    def _on_capture_canceled(self) -> None:
-        self.root.after(0, lambda: self._end_capture("Capture canceled"))
-
-    def _apply_captured(self, x: int, y: int) -> None:
-        self._positions.append((x, y))
+    def add_dot(self) -> None:
+        """Create a new draggable dot at the center of the screen."""
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        x, y = screen_w // 2, screen_h // 2
+        
+        index = len(self._positions)
+        dot = DraggableDot(self.root, index, x, y, self._on_dot_move)
+        
+        self._positions.append({
+            "x": x,
+            "y": y,
+            "delay": None,
+            "dot": dot
+        })
         self._refresh_list()
-        self._end_capture(f"Captured ({x}, {y})")
+        self.position_list.selection_clear(0, "end")
+        self.position_list.selection_set(index)
+        self.position_list.activate(index)
+        self._on_list_select()
+        self.status_var.set(f"Added dot {index+1} at center.")
 
-    def _end_capture(self, status: str) -> None:
-        self.capture_button.config(state="normal")
-        self.start_button.config(state="normal")
-        self.status_var.set(status)
-        try:
-            self.root.unbind_all("<Escape>")
-        except tk.TclError:
-            pass
-        self._capture = None
+    def _on_dot_move(self, index, x, y):
+        """Callback when a dot is dragged."""
+        self._positions[index]["x"] = x
+        self._positions[index]["y"] = y
+        self._refresh_list_item(index)
+
+    def _on_list_select(self, event=None):
+        """Update the property fields when a position is selected in the list."""
+        sel = self.position_list.curselection()
+        if not sel:
+            return
+        pos = self._positions[sel[0]]
+        delay = pos["delay"]
+        self.step_delay_var.set(str(delay) if delay is not None else "")
+
+    def apply_step_delay(self):
+        """Save the custom delay for the selected position."""
+        sel = self.position_list.curselection()
+        if not sel:
+            messagebox.showinfo("Selection Required", "Select a position first.")
+            return
+        
+        val = self.step_delay_var.get().strip()
+        index = sel[0]
+        if not val:
+            self._positions[index]["delay"] = None
+        else:
+            try:
+                ms = int(val)
+                if ms < 0: raise ValueError
+                self._positions[index]["delay"] = ms
+            except ValueError:
+                messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds.")
+                return
+        
+        self._refresh_list_item(index)
+        self.status_var.set(f"Updated delay for item {index+1}.")
 
     def remove_position(self) -> None:
         sel = self.position_list.curselection()
         if not sel:
             return
-        del self._positions[sel[0]]
+        index = sel[0]
+        self._positions[index]["dot"].destroy()
+        del self._positions[index]
+        
+        # Update sequence numbers for remaining dots
+        for i in range(index, len(self._positions)):
+            self._positions[i]["dot"].index = i
+            self._positions[i]["dot"].set_number(i + 1)
+            
         self._refresh_list()
 
     def move_position(self, delta: int) -> None:
@@ -281,56 +309,96 @@ class ClickerApp:
         target = index + delta
         if not 0 <= target < len(self._positions):
             return
+            
+        # Swap in the data list
         self._positions[index], self._positions[target] = (
             self._positions[target],
             self._positions[index],
         )
+        
+        # Sync dot indices and labels
+        self._positions[index]["dot"].index = index
+        self._positions[index]["dot"].set_number(index + 1)
+        self._positions[target]["dot"].index = target
+        self._positions[target]["dot"].set_number(target + 1)
+        
         self._refresh_list()
         self.position_list.selection_set(target)
         self.position_list.activate(target)
+        self._on_list_select()
 
     def clear_positions(self) -> None:
+        for p in self._positions:
+            p["dot"].destroy()
         self._positions.clear()
         self._refresh_list()
 
     def _refresh_list(self) -> None:
         self.position_list.delete(0, "end")
-        for i, (x, y) in enumerate(self._positions, start=1):
-            self.position_list.insert("end", f"{i}: ({x}, {y})")
+        for i in range(len(self._positions)):
+            self._refresh_list_item(i, append=True)
+
+    def _refresh_list_item(self, index, append=False):
+        pos = self._positions[index]
+        delay_str = f" [Wait: {pos['delay']}ms]" if pos['delay'] is not None else ""
+        text = f"{index+1}: ({int(pos['x'])}, {int(pos['y'])}){delay_str}"
+        
+        if append:
+            self.position_list.insert("end", text)
+        else:
+            self.position_list.delete(index)
+            self.position_list.insert(index, text)
+            # Re-select if it was selected
+            # Note: simplified, might lose focus but works for basic needs
 
     def start_clicking(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
             return
         if not self._positions:
-            messagebox.showerror("No positions", "Add at least one position first.")
+            messagebox.showerror("No positions", "Add at least one dot first.")
             return
         try:
-            interval = int(self.interval_var.get())
-            if interval < 0:
+            global_interval = int(self.interval_var.get())
+            if global_interval < 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror(
-                "Invalid interval", "Enter a non-negative whole number of milliseconds."
-            )
+            messagebox.showerror("Invalid interval", "Enter a non-negative whole number for global interval.")
             return
 
         self._stop_event.clear()
-        positions_snapshot = list(self._positions)
+        
+        # Snapshot positions for the thread
+        positions_snapshot = []
+        for p in self._positions:
+            positions_snapshot.append({
+                "x": p["x"],
+                "y": p["y"],
+                "delay": p["delay"]
+            })
+            
+        # Hide dots while clicking to avoid blocking
+        self._set_dots_visible(False)
+        
         self._click_thread = threading.Thread(
-            target=self._click_loop, args=(interval, positions_snapshot), daemon=True
+            target=self._click_loop, args=(global_interval, positions_snapshot), daemon=True
         )
         self._click_thread.start()
+        
         self.start_button.config(state="disabled")
         self.stop_button.config(state="normal")
-        self.capture_button.config(state="disabled")
         self._escape_thread = threading.Thread(target=self._watch_escape, daemon=True)
         self._escape_thread.start()
-        self.status_var.set(
-            f"Clicking {len(positions_snapshot)} positions every {interval} ms. Press Esc to stop."
-        )
+        self.status_var.set("Looping clicks... Press Esc to stop.")
 
     def stop_clicking(self) -> None:
         self._stop_event.set()
+
+    def _set_dots_visible(self, visible: bool):
+        for p in self._positions:
+            if visible:
+                p["dot"].deiconify()
+            else:
+                p["dot"].withdraw()
 
     def _watch_escape(self) -> None:
         while not self._stop_event.wait(0.03):
@@ -338,21 +406,28 @@ class ClickerApp:
                 self._stop_event.set()
                 break
 
-    def _click_loop(self, interval_ms: int, positions: list[tuple[int, int]]) -> None:
-        interval_s = interval_ms / 1000.0
+    def _click_loop(self, global_interval_ms: int, positions: list[dict]) -> None:
+        global_interval_s = global_interval_ms / 1000.0
         while not self._stop_event.is_set():
-            for x, y in positions:
+            for pos in positions:
                 if self._stop_event.is_set():
                     break
-                self._click_at(x, y)
-                if interval_s and self._stop_event.wait(interval_s):
+                
+                self._click_at(pos["x"], pos["y"])
+                
+                # Determine wait time: per-step delay or global interval
+                delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
+                wait_s = delay_ms / 1000.0
+                
+                if wait_s > 0 and self._stop_event.wait(wait_s):
                     break
+                    
         self.root.after(0, self._on_loop_exit)
 
     def _on_loop_exit(self) -> None:
+        self._set_dots_visible(True)
         self.start_button.config(state="normal")
         self.stop_button.config(state="disabled")
-        self.capture_button.config(state="normal")
         self.status_var.set("Stopped")
 
     def _click_at(self, x: int, y: int) -> None:
@@ -360,8 +435,6 @@ class ClickerApp:
 
     def on_close(self) -> None:
         self._stop_event.set()
-        if self._capture is not None:
-            self._capture.cancel()
         self.root.destroy()
 
     def run(self) -> None:
