@@ -87,7 +87,7 @@ kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
 
-DOT_SIZE = 30
+DOT_SIZE = 40
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
@@ -111,8 +111,14 @@ class DraggableDot(tk.Toplevel):
         self.config(bg='white')
         self.attributes("-transparentcolor", "white")
         
-        # Draw the dot (blue circle with white outline)
-        self.circle = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#0078d7", outline="white", width=2)
+        # 1. Outer halo border (Light Blue)
+        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#87CEFA", outline="")
+        
+        # 2. Main Dot (Primary Blue)
+        inner_m = 6
+        self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill="#0078d7", outline="white", width=1)
+        
+        # 3. Sequence Number
         self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Arial", 10, "bold"))
         
         self.canvas.bind("<Button-1>", self._on_start)
@@ -431,7 +437,8 @@ class ClickerApp:
         self.status_var.set("Stopped")
 
     def _click_at(self, x: int, y: int) -> None:
-        pydirectinput.click(x=int(x), y=int(y))
+        """Move and click with a small duration for better compatibility."""
+        pydirectinput.click(x=int(x), y=int(y), duration=0.05)
 
     def on_close(self) -> None:
         self._stop_event.set()
