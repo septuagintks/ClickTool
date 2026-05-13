@@ -22,6 +22,34 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
    python main.py
    ```
 
+### Task Scheduler Automation
+
+Use the GUI **Auto Config** button to save the startup configuration first. The app stores it at:
+
+```text
+%LOCALAPPDATA%\ClickTool\auto_config.json
+```
+
+Then configure Windows Task Scheduler to start the packaged executable with:
+
+```bash
+tool.exe --auto --silent
+```
+
+For script testing, the same automation path can be started with:
+
+```bash
+python main.py --auto --silent
+```
+
+Automation behavior:
+- Reads the saved auto config.
+- Runs without opening the Tkinter UI.
+- Allows only one Click Tool instance at a time.
+- Waits for configured target windows before clicking in Window Mode.
+- Exits automatically when the saved run finishes.
+- If the saved config has **Loop** enabled, automation stops at the first reached safety limit: default `60` seconds or `3` completed rounds.
+
 ## Features
 
 ### 1. Screen Mode
@@ -41,6 +69,7 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
 ### General Features
 - **Loop Toggle**: Choose between continuous looping or a single execution of your click sequence.
 - **Script Management**: Export your entire setup (intervals, screen points, window targets, loop state) to a JSON file and import it later.
+- **Auto Startup Config**: Import a script or save the current setup as the Task Scheduler auto-run config, including loop timeout and max-round limits.
 - **Auto-refreshing Window List**: The "Add Window" dialog automatically updates the list of available windows.
 - **Custom Delays**: Set unique wait times for each individual click point.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
@@ -56,7 +85,8 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
 4. **Configure Sequence**: Adjust the order using Up/Down buttons and set custom post-click delays.
 5. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
 6. **Save/Load**: Use **Export Script** to save your configuration and **Import Script** to load a previously saved setup.
-7. **Run**: Click **Start**. Press **Esc** to stop.
+7. **Auto-run Setup**: Use **Auto Config** to import a script or save the current setup for `--auto --silent`. For looped auto configs, set the timeout and max-round safety limits.
+8. **Run**: Click **Start**. Press **Esc** to stop.
 
 ## Dependencies
 - `pydirectinput`: Used for Screen Mode hardware-level simulation.
