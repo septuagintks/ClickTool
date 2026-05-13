@@ -1,9 +1,13 @@
 import ctypes
 from ctypes import wintypes
+import argparse
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
+import os
+import sys
+import time
 
 import pydirectinput
 import win32gui
@@ -90,9 +94,20 @@ user32.GetAsyncKeyState.restype = ctypes.c_short
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.GetLastError.restype = wintypes.DWORD
+kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 
 DOT_SIZE = 40
+APP_NAME = "ClickTool"
+AUTO_CONFIG_FILENAME = "auto_config.json"
+DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
+DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
+DEFAULT_TARGET_WAIT_SECONDS = 60
+ERROR_ALREADY_EXISTS = 183
 
 class RECT(ctypes.Structure):
     _fields_ = [
@@ -141,6 +156,282 @@ def client_to_screen(hwnd, x, y):
     pt = POINT(x, y)
     user32.ClientToScreen(hwnd, ctypes.byref(pt))
     return pt.x, pt.y
+
+
+def get_auto_config_path() -> str:
+    base_dir = os.environ.get("LOCALAPPDATA")
+    if not base_dir:
+        base_dir = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    return os.path.join(base_dir, APP_NAME, AUTO_CONFIG_FILENAME)
+
+
+def read_script_file(file_path: str) -> dict:
+    with open(file_path, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    normalize_script_data(data)
+    return data
+
+
+def write_script_file(file_path: str, data: dict) -> None:
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def normalize_script_data(data: dict) -> dict:
+    if "mode" not in data:
+        data["mode"] = "window" if data.get("window_positions") else "screen"
+
+    auto = data.setdefault("auto", {})
+    auto["loop_timeout_seconds"] = coerce_non_negative_int(
+        auto.get("loop_timeout_seconds"),
+        DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS,
+    )
+    auto["loop_max_rounds"] = coerce_non_negative_int(
+        auto.get("loop_max_rounds"),
+        DEFAULT_AUTO_LOOP_MAX_ROUNDS,
+    )
+    auto["target_wait_seconds"] = coerce_non_negative_int(
+        auto.get("target_wait_seconds"),
+        DEFAULT_TARGET_WAIT_SECONDS,
+    )
+    return data
+
+
+def coerce_non_negative_int(value, default: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, value)
+
+
+def list_visible_windows() -> list[tuple[int, str]]:
+    windows: list[tuple[int, str]] = []
+
+    def enum_callback(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            title = get_window_title(hwnd)
+            if title:
+                windows.append((hwnd, title))
+        return True
+
+    user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+    return windows
+
+
+def find_windows_by_titles(titles: list[str]) -> dict[str, int]:
+    active_windows = list_visible_windows()
+    found: dict[str, int] = {}
+
+    for title in titles:
+        hwnd = next((h for h, t in active_windows if t == title), None)
+        if hwnd is None:
+            title_lower = title.lower()
+            hwnd = next((h for h, t in active_windows if title_lower in t.lower()), None)
+        if hwnd:
+            found[title] = hwnd
+
+    return found
+
+
+def wait_for_windows(titles: list[str], timeout_seconds: int) -> dict[str, int]:
+    if not titles:
+        return {}
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        found = find_windows_by_titles(titles)
+        if all(title in found for title in titles):
+            return found
+        if timeout_seconds <= 0 or time.monotonic() >= deadline:
+            return found
+        time.sleep(1)
+
+
+def click_window_position(hwnd: int, x: int, y: int) -> bool:
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
+
+    rect = get_window_rect(hwnd)
+    if not rect:
+        return False
+
+    sx = rect[0] + x
+    sy = rect[1] + y
+    cl_tl_sx, cl_tl_sy = client_to_screen(hwnd, 0, 0)
+    cx = int(sx - cl_tl_sx)
+    cy = int(sy - cl_tl_sy)
+
+    target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
+    if not target_hwnd:
+        target_hwnd = hwnd
+
+    t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
+    tx = int(sx - t_cl_tl_sx)
+    ty = int(sy - t_cl_tl_sy)
+
+    lparam = win32api.MAKELONG(tx, ty)
+    win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+    win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+    return True
+
+
+def acquire_single_instance_mutex() -> int | None:
+    mutex_name = f"Local\\{APP_NAME}SingleInstance"
+    handle = kernel32.CreateMutexW(None, True, mutex_name)
+    if not handle:
+        return None
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return None
+    return handle
+
+
+def release_single_instance_mutex(handle: int | None) -> None:
+    if handle:
+        kernel32.ReleaseMutex(handle)
+        kernel32.CloseHandle(handle)
+
+
+def sleep_until_deadline(seconds: float, deadline: float | None) -> None:
+    if seconds <= 0:
+        return
+    if deadline is None:
+        time.sleep(seconds)
+        return
+
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        time.sleep(min(seconds, remaining))
+
+
+def run_auto_config(config_path: str) -> int:
+    if not os.path.exists(config_path):
+        return 2
+
+    try:
+        data = read_script_file(config_path)
+    except Exception:
+        return 2
+
+    mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+    loop_enabled = bool(data.get("loop", True))
+    global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
+    auto = data.get("auto", {})
+    timeout_seconds = coerce_non_negative_int(
+        auto.get("loop_timeout_seconds"),
+        DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS,
+    )
+    max_rounds = coerce_non_negative_int(
+        auto.get("loop_max_rounds"),
+        DEFAULT_AUTO_LOOP_MAX_ROUNDS,
+    )
+    target_wait_seconds = coerce_non_negative_int(
+        auto.get("target_wait_seconds"),
+        DEFAULT_TARGET_WAIT_SECONDS,
+    )
+
+    if loop_enabled and timeout_seconds == 0 and max_rounds == 0:
+        timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
+        max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
+
+    positions: list[dict] = []
+    if mode == "window":
+        titles = set(data.get("target_windows", []))
+        titles.update(p.get("win_title") for p in data.get("window_positions", []) if p.get("win_title"))
+        titles = sorted(titles)
+        window_map = wait_for_windows(titles, target_wait_seconds)
+
+        for p in data.get("window_positions", []):
+            hwnd = window_map.get(p.get("win_title"))
+            if hwnd:
+                positions.append({
+                    "x": p["x"],
+                    "y": p["y"],
+                    "delay": p.get("delay"),
+                    "hwnd": hwnd,
+                })
+    else:
+        for p in data.get("screen_positions", []):
+            positions.append({
+                "x": p["x"],
+                "y": p["y"],
+                "delay": p.get("delay"),
+            })
+
+    if not positions:
+        return 3
+
+    deadline = None
+    if loop_enabled and timeout_seconds > 0:
+        deadline = time.monotonic() + timeout_seconds
+
+    rounds = 0
+    while True:
+        for pos in positions:
+            if deadline is not None and time.monotonic() >= deadline:
+                return 0
+
+            if mode == "window":
+                click_window_position(pos["hwnd"], pos["x"], pos["y"])
+            else:
+                pydirectinput.click(x=int(pos["x"]), y=int(pos["y"]), duration=0.05)
+
+            delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
+            sleep_until_deadline(delay_ms / 1000.0, deadline)
+
+        rounds += 1
+        if not loop_enabled:
+            return 0
+        if max_rounds > 0 and rounds >= max_rounds:
+            return 0
+        if deadline is not None and time.monotonic() >= deadline:
+            return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Mouse Click Tool")
+    parser.add_argument("--auto", action="store_true", help="Run the saved auto startup config.")
+    parser.add_argument("--silent", action="store_true", help="Suppress UI messages in automation mode.")
+    parser.add_argument("--config", help="Optional config path for --auto. Defaults to the saved auto config.")
+    return parser.parse_args(argv)
+
+
+def show_already_running_message() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Already Running", "Click Tool is already running.")
+    root.destroy()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    exe_name = os.path.basename(sys.executable).lower()
+    if args.silent and exe_name not in {"python.exe", "pythonw.exe"}:
+        try:
+            kernel32.FreeConsole()
+        except (AttributeError, OSError):
+            pass
+
+    mutex_handle = acquire_single_instance_mutex()
+    if mutex_handle is None:
+        if not args.silent:
+            show_already_running_message()
+        return 4
+
+    try:
+        if args.auto:
+            config_path = args.config or get_auto_config_path()
+            return run_auto_config(config_path)
+
+        ClickerApp().run()
+        return 0
+    finally:
+        release_single_instance_mutex(mutex_handle)
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
@@ -238,6 +529,8 @@ class ClickerApp:
         self.step_delay_var = tk.StringVar()
         self.loop_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
+        self.auto_loop_timeout_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS))
+        self.auto_loop_max_rounds_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_MAX_ROUNDS))
         
         # Screen Mode State
         self._screen_positions: list[dict] = []
@@ -290,6 +583,7 @@ class ClickerApp:
         
         ttk.Button(run_row, text="Import Script", command=self.import_script).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(run_row, text="Export Script", command=self.export_script).grid(row=0, column=3, padx=(4, 0))
+        ttk.Button(run_row, text="Auto Config", command=self.open_auto_config_dialog).grid(row=0, column=4, padx=(4, 0))
 
         ttk.Label(bottom_frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=(12, 0)
@@ -820,6 +1114,215 @@ class ClickerApp:
         refresh_fn(index)
         self.status_var.set(f"Updated delay for item {index+1}.")
 
+    def collect_script_data(self) -> dict:
+        """Return the current GUI state in the script JSON format."""
+        current_tab = self.notebook.index(self.notebook.select())
+        return normalize_script_data({
+            "mode": "screen" if current_tab == 0 else "window",
+            "global_interval": self.interval_var.get(),
+            "loop": self.loop_var.get(),
+            "screen_positions": [
+                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
+                for p in self._screen_positions
+            ],
+            "target_windows": [w["title"] for w in self._target_windows],
+            "window_positions": [
+                {
+                    "x": p["x"],
+                    "y": p["y"],
+                    "delay": p["delay"],
+                    "win_title": p["win_title"]
+                }
+                for p in self._window_positions
+            ],
+        })
+
+    def apply_script_data(self, data: dict, source_path: str | None = None, show_warnings: bool = True) -> None:
+        """Load script JSON data into the GUI."""
+        normalize_script_data(data)
+
+        self.clear_screen_positions()
+        self.clear_window_positions()
+        self._target_windows.clear()
+
+        self.interval_var.set(data.get("global_interval", "500"))
+        self.loop_var.set(data.get("loop", True))
+
+        mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+        self.notebook.select(0 if mode == "screen" else 1)
+
+        for p_data in data.get("screen_positions", []):
+            idx = len(self._screen_positions)
+            dot = DraggableDot(
+                self.root,
+                idx,
+                p_data["x"],
+                p_data["y"],
+                self._on_screen_dot_move,
+                on_click=self._on_screen_dot_click,
+            )
+            self._screen_positions.append({
+                "x": p_data["x"],
+                "y": p_data["y"],
+                "delay": p_data.get("delay"),
+                "dot": dot,
+            })
+        self._refresh_screen_list()
+
+        active_windows = list_visible_windows()
+        missing_windows = []
+        for win_title in data.get("target_windows", []):
+            found_hwnd = next((h for h, t in active_windows if t == win_title), None)
+            if found_hwnd:
+                self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
+            else:
+                missing_windows.append(win_title)
+
+        self._refresh_window_list()
+
+        for p_data in data.get("window_positions", []):
+            win_title = p_data["win_title"]
+            found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
+            idx = len(self._window_positions)
+            dot = DraggableDot(
+                self.root,
+                idx,
+                p_data["x"],
+                p_data["y"],
+                self._on_window_dot_move,
+                on_click=self._on_window_dot_click,
+                hwnd=found_hwnd,
+            )
+            self._window_positions.append({
+                "x": p_data["x"],
+                "y": p_data["y"],
+                "delay": p_data.get("delay"),
+                "dot": dot,
+                "hwnd": found_hwnd,
+                "win_title": win_title,
+            })
+        self._refresh_window_pt_list()
+        self._on_tab_changed(None)
+
+        if missing_windows and show_warnings:
+            messagebox.showwarning(
+                "Missing Windows",
+                "The following windows could not be found and their points may not work correctly:\n\n" +
+                "\n".join(missing_windows),
+            )
+
+        if source_path:
+            self.status_var.set(f"Imported script from {source_path}")
+
+    def open_auto_config_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Auto Startup Config")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        config_path = get_auto_config_path()
+        frame = ttk.Frame(dialog, padding=14)
+        frame.pack(fill="both", expand=True)
+
+        path_text = config_path
+        if len(path_text) > 72:
+            path_text = "..." + path_text[-69:]
+
+        ttk.Label(frame, text="Auto config file").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame, text=path_text, foreground="#555555").grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 10))
+
+        ttk.Label(frame, text="Loop timeout (seconds)").grid(row=2, column=0, sticky="w")
+        timeout_entry = ttk.Entry(frame, textvariable=self.auto_loop_timeout_var, width=10)
+        timeout_entry.grid(row=2, column=1, sticky="w", padx=(8, 0))
+
+        ttk.Label(frame, text="Max loop rounds").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        rounds_entry = ttk.Entry(frame, textvariable=self.auto_loop_max_rounds_var, width=10)
+        rounds_entry.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        status_var = tk.StringVar()
+        if os.path.exists(config_path):
+            try:
+                existing = read_script_file(config_path)
+                auto = existing.get("auto", {})
+                self.auto_loop_timeout_var.set(str(auto.get("loop_timeout_seconds", DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS)))
+                self.auto_loop_max_rounds_var.set(str(auto.get("loop_max_rounds", DEFAULT_AUTO_LOOP_MAX_ROUNDS)))
+                status_var.set("Existing auto config loaded.")
+            except Exception as e:
+                status_var.set(f"Existing auto config is invalid: {e}")
+        else:
+            status_var.set("No auto config saved yet.")
+
+        def apply_auto_limits(data: dict) -> dict | None:
+            try:
+                timeout_seconds = int(self.auto_loop_timeout_var.get().strip())
+                max_rounds = int(self.auto_loop_max_rounds_var.get().strip())
+                if timeout_seconds < 0 or max_rounds < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid Auto Limits", "Enter non-negative whole numbers for timeout and rounds.")
+                return None
+
+            normalize_script_data(data)
+            data["auto"]["loop_timeout_seconds"] = timeout_seconds
+            data["auto"]["loop_max_rounds"] = max_rounds
+            data["auto"]["target_wait_seconds"] = DEFAULT_TARGET_WAIT_SECONDS
+            return data
+
+        def save_data_to_auto(data: dict, success_message: str) -> None:
+            data = apply_auto_limits(data)
+            if data is None:
+                return
+            try:
+                write_script_file(config_path, data)
+            except Exception as e:
+                messagebox.showerror("Auto Config Error", f"Failed to save auto config: {e}")
+                return
+            status_var.set(success_message)
+            self.status_var.set(success_message)
+
+        def import_to_auto() -> None:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Import Script To Auto Config",
+            )
+            if not file_path:
+                return
+            try:
+                data = read_script_file(file_path)
+            except Exception as e:
+                messagebox.showerror("Import Error", f"Failed to read script: {e}")
+                return
+            save_data_to_auto(data, f"Auto config imported from {file_path}")
+
+        def save_current_to_auto() -> None:
+            save_data_to_auto(self.collect_script_data(), "Current setup saved as auto config.")
+
+        def clear_auto_config() -> None:
+            if os.path.exists(config_path):
+                try:
+                    os.remove(config_path)
+                except Exception as e:
+                    messagebox.showerror("Auto Config Error", f"Failed to remove auto config: {e}")
+                    return
+            status_var.set("Auto config cleared.")
+            self.status_var.set("Auto config cleared.")
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Button(button_row, text="Import Script", command=import_to_auto).pack(side="left")
+        ttk.Button(button_row, text="Save Current", command=save_current_to_auto).pack(side="left", padx=(6, 0))
+        ttk.Button(button_row, text="Clear", command=clear_auto_config).pack(side="left", padx=(6, 0))
+        ttk.Button(button_row, text="Close", command=dialog.destroy).pack(side="right", padx=(20, 0))
+
+        ttk.Label(frame, textvariable=status_var, foreground="#005a9e").grid(
+            row=5,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(12, 0),
+        )
+
     def start_clicking(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
             return
@@ -891,45 +1394,13 @@ class ClickerApp:
                 break
 
     def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str) -> None:
-        global_interval_s = global_interval_ms / 1000.0
         while not self._stop_event.is_set():
             for pos in positions:
                 if self._stop_event.is_set():
                     break
                 
                 if mode == "window":
-                    hwnd = pos["hwnd"]
-                    if user32.IsWindow(hwnd):
-                        rect = get_window_rect(hwnd)
-                        if rect:
-                            # Screen coordinate of the click point
-                            sx = rect[0] + pos["x"]
-                            sy = rect[1] + pos["y"]
-                            
-                            # Screen coordinate of client area top-left
-                            cl_tl_sx, cl_tl_sy = client_to_screen(hwnd, 0, 0)
-                            
-                            # Client-relative coordinates
-                            cx = int(sx - cl_tl_sx)
-                            cy = int(sy - cl_tl_sy)
-                            
-                            # Find the actual child window at these client coordinates
-                            target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
-                            if not target_hwnd:
-                                target_hwnd = hwnd
-                                
-                            # Convert to target_hwnd's own client coordinates
-                            # (Important if target_hwnd is a child)
-                            t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
-                            tx = int(sx - t_cl_tl_sx)
-                            ty = int(sy - t_cl_tl_sy)
-                            
-                            lparam = win32api.MAKELONG(tx, ty)
-                            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
-                            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
-                        else:
-                            continue
-                    else:
+                    if not click_window_position(pos["hwnd"], pos["x"], pos["y"]):
                         continue
                 else:
                     self._click_at(pos["x"], pos["y"])
@@ -959,25 +1430,6 @@ class ClickerApp:
 
     def export_script(self):
         """Save the current configuration to a JSON file."""
-        data = {
-            "global_interval": self.interval_var.get(),
-            "loop": self.loop_var.get(),
-            "screen_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
-                for p in self._screen_positions
-            ],
-            "target_windows": [w["title"] for w in self._target_windows],
-            "window_positions": [
-                {
-                    "x": p["x"],
-                    "y": p["y"],
-                    "delay": p["delay"],
-                    "win_title": p["win_title"]
-                }
-                for p in self._window_positions
-            ]
-        }
-        
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -985,8 +1437,7 @@ class ClickerApp:
         )
         if file_path:
             try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=4, ensure_ascii=False)
+                write_script_file(file_path, self.collect_script_data())
                 messagebox.showinfo("Export Successful", f"Script saved to {file_path}")
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to save script: {e}")
@@ -1001,83 +1452,11 @@ class ClickerApp:
             return
             
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = read_script_file(file_path)
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to read script: {e}")
             return
-            
-        # Clear existing
-        self.clear_screen_positions()
-        self.clear_window_positions()
-        self._target_windows.clear()
-        
-        # Restore global interval
-        self.interval_var.set(data.get("global_interval", "500"))
-        self.loop_var.set(data.get("loop", True))
-        
-        # Restore screen positions
-        for p_data in data.get("screen_positions", []):
-            idx = len(self._screen_positions)
-            dot = DraggableDot(self.root, idx, p_data["x"], p_data["y"], self._on_screen_dot_move,
-                              on_click=self._on_screen_dot_click)
-            self._screen_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot
-            })
-        self._refresh_screen_list()
-        
-        # Restore target windows and re-find HWNDs
-        all_active_windows = []
-        def enum_callback(hwnd, lparam):
-            if user32.IsWindowVisible(hwnd):
-                title = get_window_title(hwnd)
-                if title:
-                    all_active_windows.append((hwnd, title))
-            return True
-        user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
-        
-        missing_windows = []
-        for win_title in data.get("target_windows", []):
-            # Find HWND by title
-            found_hwnd = next((h for h, t in all_active_windows if t == win_title), None)
-            if found_hwnd:
-                self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
-            else:
-                missing_windows.append(win_title)
-        
-        self._refresh_window_list()
-        
-        # Restore window positions
-        for p_data in data.get("window_positions", []):
-            win_title = p_data["win_title"]
-            found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
-            
-            # Even if hwnd not found, we keep the data but dot will be hidden/dummy if hwnd is None
-            idx = len(self._window_positions)
-            dot = DraggableDot(self.root, idx, p_data["x"], p_data["y"], self._on_window_dot_move,
-                              on_click=self._on_window_dot_click, hwnd=found_hwnd)
-            
-            self._window_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot,
-                "hwnd": found_hwnd,
-                "win_title": win_title
-            })
-        self._refresh_window_pt_list()
-        
-        if missing_windows:
-            messagebox.showwarning(
-                "Missing Windows",
-                "The following windows could not be found and their points may not work correctly:\n\n" + 
-                "\n".join(missing_windows)
-            )
-        
-        self.status_var.set(f"Imported script from {file_path}")
+        self.apply_script_data(data, source_path=file_path)
 
     def on_close(self) -> None:
         self._stop_event.set()
@@ -1088,4 +1467,4 @@ class ClickerApp:
 
 
 if __name__ == "__main__":
-    ClickerApp().run()
+    raise SystemExit(main())
