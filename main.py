@@ -4,12 +4,15 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
-import time
+
+import pydirectinput
+import win32gui
+import win32api
+import win32con
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-# WinAPI Constants
 WH_MOUSE_LL = 14
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
@@ -17,106 +20,11 @@ WM_RBUTTONDOWN = 0x0204
 WM_QUIT = 0x0012
 HC_ACTION = 0
 VK_ESCAPE = 0x1B
-MK_LBUTTON = 0x0001
 
-INPUT_MOUSE = 0
-MOUSEEVENTF_MOVE = 0x0001
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_ABSOLUTE = 0x8000
-SM_CXSCREEN = 0
-SM_CYSCREEN = 1
 
 PROCESS_PER_MONITOR_DPI_AWARE = 2
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 
-# WinAPI Structures
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-class RECT(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", ctypes.c_ushort),
-        ("wScan", ctypes.c_ushort),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", ctypes.c_ulong),
-        ("wParamL", ctypes.c_ushort),
-        ("wParamH", ctypes.c_ushort),
-    ]
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
-
-class INPUT(ctypes.Structure):
-    _fields_ = [("type", ctypes.c_ulong), ("iu", INPUT_UNION)]
-
-# WinAPI Function Prototypes
-user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
-user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
-user32.SendInput.restype = wintypes.UINT
-user32.GetSystemMetrics.argtypes = [ctypes.c_int]
-user32.GetSystemMetrics.restype = ctypes.c_int
-user32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, POINT, wintypes.UINT]
-user32.ChildWindowFromPointEx.restype = wintypes.HWND
-user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
-user32.ScreenToClient.restype = wintypes.BOOL
-
-CWP_ALL = 0x0000
-CWP_SKIPINVISIBLE = 0x0001
-
-def makelong(low, high):
-    return (low & 0xFFFF) | ((high & 0xFFFF) << 16)
-
-def send_mouse_click(x, y):
-    """Perform a hardware-level click using SendInput."""
-    screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
-    screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
-    
-    # Normalized coordinates (0-65535)
-    nx = int(x * 65535 / (screen_w - 1))
-    ny = int(y * 65535 / (screen_h - 1))
-    
-    # Move
-    inp_move = INPUT()
-    inp_move.type = INPUT_MOUSE
-    inp_move.iu.mi = MOUSEINPUT(nx, ny, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0, None)
-    
-    # Down
-    inp_down = INPUT()
-    inp_down.type = INPUT_MOUSE
-    inp_down.iu.mi = MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None)
-    
-    # Up
-    inp_up = INPUT()
-    inp_up.type = INPUT_MOUSE
-    inp_up.iu.mi = MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, None)
-    
-    inputs = (INPUT * 3)(inp_move, inp_down, inp_up)
-    user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
 
 def enable_dpi_awareness() -> None:
     try:
@@ -999,27 +907,26 @@ class ClickerApp:
                             sy = rect[1] + pos["y"]
                             
                             # Screen coordinate of client area top-left
-                            cl_tl = POINT(0, 0)
-                            user32.ClientToScreen(hwnd, ctypes.byref(cl_tl))
+                            cl_tl_sx, cl_tl_sy = client_to_screen(hwnd, 0, 0)
                             
                             # Client-relative coordinates
-                            cx = int(sx - cl_tl.x)
-                            cy = int(sy - cl_tl.y)
+                            cx = int(sx - cl_tl_sx)
+                            cy = int(sy - cl_tl_sy)
                             
                             # Find the actual child window at these client coordinates
-                            target_hwnd = user32.ChildWindowFromPointEx(hwnd, POINT(cx, cy), CWP_SKIPINVISIBLE)
+                            target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
                             if not target_hwnd:
                                 target_hwnd = hwnd
                                 
                             # Convert to target_hwnd's own client coordinates
-                            t_cl_tl = POINT(0, 0)
-                            user32.ClientToScreen(target_hwnd, ctypes.byref(t_cl_tl))
-                            tx = int(sx - t_cl_tl.x)
-                            ty = int(sy - t_cl_tl.y)
+                            # (Important if target_hwnd is a child)
+                            t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
+                            tx = int(sx - t_cl_tl_sx)
+                            ty = int(sy - t_cl_tl_sy)
                             
-                            lparam = makelong(tx, ty)
-                            user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-                            user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, lparam)
+                            lparam = win32api.MAKELONG(tx, ty)
+                            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+                            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
                         else:
                             continue
                     else:
@@ -1047,8 +954,8 @@ class ClickerApp:
         self.status_var.set("Stopped")
 
     def _click_at(self, x: int, y: int) -> None:
-        """Move and click using SendInput."""
-        send_mouse_click(x, y)
+        """Move and click with a small duration for better compatibility."""
+        pydirectinput.click(x=int(x), y=int(y), duration=0.05)
 
     def export_script(self):
         """Save the current configuration to a JSON file."""
