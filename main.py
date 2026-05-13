@@ -236,6 +236,7 @@ class ClickerApp:
 
         self.interval_var = tk.StringVar(value="500")
         self.step_delay_var = tk.StringVar()
+        self.loop_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
         
         # Screen Mode State
@@ -278,10 +279,11 @@ class ClickerApp:
         ttk.Entry(bottom_frame, textvariable=self.interval_var, width=12).grid(
             row=0, column=1, padx=(8, 0), sticky="w"
         )
+        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(12, 0))
         
         run_row = ttk.Frame(bottom_frame)
-        run_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        self.start_button = ttk.Button(run_row, text="Start Loop", command=self.start_clicking)
+        run_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        self.start_button = ttk.Button(run_row, text="Start", command=self.start_clicking)
         self.start_button.grid(row=0, column=0, padx=(0, 8))
         self.stop_button = ttk.Button(run_row, text="Stop", command=self.stop_clicking, state="disabled")
         self.stop_button.grid(row=0, column=1, padx=(0, 8))
@@ -514,6 +516,11 @@ class ClickerApp:
                 else:
                     self._target_windows.append({"hwnd": hwnd, "title": title})
                     self._refresh_window_list()
+                    # Select the newly added window
+                    new_idx = len(self._target_windows) - 1
+                    self.target_win_list.selection_clear(0, "end")
+                    self.target_win_list.selection_set(new_idx)
+                    self.target_win_list.activate(new_idx)
                 dialog.destroy()
         
         ttk.Button(dialog, text="Select", command=on_select).pack(pady=8)
@@ -889,7 +896,7 @@ class ClickerApp:
             for pos in positions:
                 if self._stop_event.is_set():
                     break
-
+                
                 if mode == "window":
                     hwnd = pos["hwnd"]
                     if user32.IsWindow(hwnd):
@@ -933,6 +940,10 @@ class ClickerApp:
                 
                 if wait_s > 0 and self._stop_event.wait(wait_s):
                     break
+            
+            # If loop is disabled, stop after one full pass
+            if not self.loop_var.get():
+                break
                     
         self.root.after(0, self._on_loop_exit)
 
