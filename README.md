@@ -59,5 +59,6 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
 7. **Run**: Click **Start**. Press **Esc** to stop.
 
 ## Dependencies
-- **None**: This is the lightweight (minified) version using direct Windows API calls via `ctypes`.
-- Built-in libraries used: `tkinter`, `json`, `threading`, `ctypes`.
+- `pydirectinput`: Used for Screen Mode hardware-level simulation.
+- `pywin32`: Used for Window Mode background messaging and child-window detection.
+- `tkinter`: Standard GUI library.
