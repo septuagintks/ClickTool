@@ -52,3 +52,11 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 ## Dependencies
 - **None**: This is the lightweight version using direct Windows API calls.
 - Standard libraries used: `tkinter`, `json`, `threading`, `ctypes`, `time`.
+
+## Build Executable
+
+You can compile this tool into a standalone executable using `nuitka`:
+
+```bash
+nuitka --onefile --windows-console-mode=disable main.py
+```
