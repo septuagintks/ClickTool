@@ -1218,6 +1218,17 @@ class ClickerApp:
         dialog = tk.Toplevel(self.root)
         dialog.title("Auto Startup Config")
         dialog.resizable(False, False)
+
+        # Center dialog relative to main window
+        self.root.update_idletasks()
+        dialog.update_idletasks()
+        # Use a reasonable default size if not yet rendered, or use reqwidth/height
+        width = 450
+        height = 350
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (width // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (height // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+
         dialog.transient(self.root)
         dialog.grab_set()
 

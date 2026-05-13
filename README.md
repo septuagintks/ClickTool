@@ -88,7 +88,12 @@ Automation behavior:
 7. **Auto-run Setup**: Use **Auto Config** to import a script or save the current setup for `--auto --silent`. For looped auto configs, set the timeout and max-round safety limits.
 8. **Run**: Click **Start**. Press **Esc** to stop.
 
-## Dependencies
-- `pydirectinput`: Used for Screen Mode hardware-level simulation.
-- `pywin32`: Used for Window Mode background messaging and child-window detection.
-- `tkinter`: Standard GUI library.
+## Build Executable
+
+You can compile this tool into a standalone executable using `nuitka`:
+
+```bash
+nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter main.py
+```
+
+*Note: Requires `pywin32` and `pydirectinput` to be installed in the build environment.*
