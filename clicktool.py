@@ -262,43 +262,71 @@ def click_window_position(hwnd: int, x: int, y: int) -> bool:
     sx = rect[0] + x
     sy = rect[1] + y
     
-    # Check if point is inside the client area
-    cl_tl_sx, cl_tl_sy = client_to_screen(hwnd, 0, 0)
-    cl_rect = RECT()
-    user32.GetClientRect(hwnd, ctypes.byref(cl_rect))
-    cw = cl_rect.right - cl_rect.left
-    ch = cl_rect.bottom - cl_rect.top
+    # 1. Find the deepest child window that contains this screen point.
+    # Many modern apps put interactive content (tabs, search bars) in what appears to be the title bar.
+    # ChildWindowFromPoint often misses these if they are not in the main client area.
+    target_hwnd = hwnd
+    best_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
     
-    cx = int(sx - cl_tl_sx)
-    cy = int(sy - cl_tl_sy)
-
-    if 0 <= cx < cw and 0 <= cy < ch:
+    def enum_cb(child_hwnd, lparam):
+        nonlocal target_hwnd, best_area
+        try:
+            r = win32gui.GetWindowRect(child_hwnd)
+            if r[0] <= sx < r[2] and r[1] <= sy < r[3]:
+                area = (r[2] - r[0]) * (r[3] - r[1])
+                # We prefer smaller windows (likely deeper children)
+                if area <= best_area:
+                    target_hwnd = child_hwnd
+                    best_area = area
+        except:
+            pass
+        return True
+        
+    win32gui.EnumChildWindows(hwnd, enum_cb, None)
+    
+    # 2. Get coordinates relative to the found window's client area
+    t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
+    tx = int(sx - t_cl_tl_sx)
+    ty = int(sy - t_cl_tl_sy)
+    
+    # 3. Check if it's in the client area of the found target
+    t_cl_rect = RECT()
+    user32.GetClientRect(target_hwnd, ctypes.byref(t_cl_rect))
+    cw = t_cl_rect.right - t_cl_rect.left
+    ch = t_cl_rect.bottom - t_cl_rect.top
+    
+    if 0 <= tx < cw and 0 <= ty < ch:
         # Client area click logic
-        target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
-        if not target_hwnd:
-            target_hwnd = hwnd
-
-        t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
-        tx = int(sx - t_cl_tl_sx)
-        ty = int(sy - t_cl_tl_sy)
-
         lparam = win32api.MAKELONG(tx, ty)
         win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
         win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
     else:
         # Non-client area click logic (Title bar, borders, etc.)
         lparam_screen = win32api.MAKELONG(int(sx), int(sy))
-        hit_test = win32gui.SendMessage(hwnd, win32con.WM_NCHITTEST, 0, lparam_screen)
+        
+        # Use SendMessageTimeout to avoid hanging if the target window is busy
+        # or enters a modal drag loop. SMTO_ABORTIFHUNG = 2.
+        try:
+            res, hit_test = win32gui.SendMessageTimeout(
+                target_hwnd, win32con.WM_NCHITTEST, 0, lparam_screen, 2, 500
+            )
+            if res == 0: hit_test = win32con.HTNOWHERE
+        except:
+            hit_test = win32con.HTNOWHERE
         
         if hit_test == win32con.HTCLIENT:
-            # If hit test says it's client, use client messages
-            lparam = win32api.MAKELONG(cx, cy)
-            win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
-            win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+            lparam = win32api.MAKELONG(tx, ty)
+            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+        elif hit_test == win32con.HTCAPTION:
+            # Sending NCLBUTTONDOWN on HTCAPTION can start a modal drag loop.
+            # We follow up with NCMOUSEMOVE and NCLBUTTONUP to try and satisfy the loop.
+            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
+            win32gui.PostMessage(target_hwnd, win32con.WM_NCMOUSEMOVE, hit_test, lparam_screen)
+            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
         else:
-            # Post non-client messages (uses screen coordinates in lParam)
-            win32gui.PostMessage(hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
-            win32gui.PostMessage(hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
+            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
+            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
             
     return True
 
