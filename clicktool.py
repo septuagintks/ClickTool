@@ -261,21 +261,45 @@ def click_window_position(hwnd: int, x: int, y: int) -> bool:
 
     sx = rect[0] + x
     sy = rect[1] + y
+    
+    # Check if point is inside the client area
     cl_tl_sx, cl_tl_sy = client_to_screen(hwnd, 0, 0)
+    cl_rect = RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(cl_rect))
+    cw = cl_rect.right - cl_rect.left
+    ch = cl_rect.bottom - cl_rect.top
+    
     cx = int(sx - cl_tl_sx)
     cy = int(sy - cl_tl_sy)
 
-    target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
-    if not target_hwnd:
-        target_hwnd = hwnd
+    if 0 <= cx < cw and 0 <= cy < ch:
+        # Client area click logic
+        target_hwnd = win32gui.ChildWindowFromPoint(hwnd, (cx, cy))
+        if not target_hwnd:
+            target_hwnd = hwnd
 
-    t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
-    tx = int(sx - t_cl_tl_sx)
-    ty = int(sy - t_cl_tl_sy)
+        t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
+        tx = int(sx - t_cl_tl_sx)
+        ty = int(sy - t_cl_tl_sy)
 
-    lparam = win32api.MAKELONG(tx, ty)
-    win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
-    win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+        lparam = win32api.MAKELONG(tx, ty)
+        win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+        win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+    else:
+        # Non-client area click logic (Title bar, borders, etc.)
+        lparam_screen = win32api.MAKELONG(int(sx), int(sy))
+        hit_test = win32gui.SendMessage(hwnd, win32con.WM_NCHITTEST, 0, lparam_screen)
+        
+        if hit_test == win32con.HTCLIENT:
+            # If hit test says it's client, use client messages
+            lparam = win32api.MAKELONG(cx, cy)
+            win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+            win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+        else:
+            # Post non-client messages (uses screen coordinates in lParam)
+            win32gui.PostMessage(hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
+            win32gui.PostMessage(hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
+            
     return True
 
 
