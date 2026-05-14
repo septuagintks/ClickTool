@@ -371,17 +371,32 @@ def run_auto_config(config_path: str) -> int:
 
     rounds = 0
     while True:
-        for pos in positions:
+        for action in data.get("actions", []):
             if deadline is not None and time.monotonic() >= deadline:
                 return 0
 
-            if mode == "window":
-                click_window_position(pos["hwnd"], pos["x"], pos["y"])
-            else:
-                pydirectinput.click(x=int(pos["x"]), y=int(pos["y"]), duration=0.05)
-
-            delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
-            sleep_until_deadline(delay_ms / 1000.0, deadline)
+            action_type = action.get("type", "click")
+            if action_type == "click":
+                if mode == "window":
+                    hwnd = window_map.get(action.get("win_title"))
+                    if hwnd:
+                        click_window_position(hwnd, action["x"], action["y"])
+                else:
+                    pydirectinput.click(x=int(action["x"]), y=int(action["y"]), duration=0.05)
+                
+                # Implicit wait if global_interval is set and no specific delay in action
+                # However, the new system prefers explicit wait items.
+                # To maintain compatibility with older scripts that might be normalized:
+                delay_ms = action.get("delay")
+                if delay_ms is None:
+                    delay_ms = global_interval_ms
+                if delay_ms > 0:
+                    sleep_until_deadline(delay_ms / 1000.0, deadline)
+            
+            elif action_type == "wait":
+                wait_ms = action.get("ms", 0)
+                if wait_ms > 0:
+                    sleep_until_deadline(wait_ms / 1000.0, deadline)
 
         rounds += 1
         if not loop_enabled:
@@ -628,11 +643,12 @@ class ClickerApp:
         # Row 4: Controls
         edit_row = ttk.Frame(frame)
         edit_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        ttk.Button(edit_row, text="Add Dot", command=self.add_screen_dot).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(edit_row, text="Remove", command=self.remove_screen_position).grid(row=0, column=1, padx=6)
-        ttk.Button(edit_row, text="Up", width=4, command=lambda: self.move_screen_position(-1)).grid(row=0, column=2, padx=(6, 0))
-        ttk.Button(edit_row, text="Down", width=5, command=lambda: self.move_screen_position(1)).grid(row=0, column=3, padx=(4, 0))
-        ttk.Button(edit_row, text="Clear", command=self.clear_screen_positions).grid(row=0, column=4, padx=(6, 0))
+        ttk.Button(edit_row, text="Add Dot", command=self.add_screen_dot).grid(row=0, column=0, padx=(0, 4))
+        ttk.Button(edit_row, text="Add Wait", command=self.add_screen_wait).grid(row=0, column=1, padx=4)
+        ttk.Button(edit_row, text="Remove", command=self.remove_screen_position).grid(row=0, column=2, padx=4)
+        ttk.Button(edit_row, text="Up", width=4, command=lambda: self.move_screen_position(-1)).grid(row=0, column=3, padx=4)
+        ttk.Button(edit_row, text="Down", width=5, command=lambda: self.move_screen_position(1)).grid(row=0, column=4, padx=4)
+        ttk.Button(edit_row, text="Clear", command=self.clear_screen_positions).grid(row=0, column=5, padx=(4, 0))
 
     def _build_window_mode_ui(self, frame) -> None:
         # Two columns: Window Column and Click Point Column
@@ -682,6 +698,7 @@ class ClickerApp:
         pt_btn_row = ttk.Frame(pt_frame)
         pt_btn_row.pack(fill="x")
         ttk.Button(pt_btn_row, text="Add Dot", command=self.add_window_dot).pack(side="left", padx=2)
+        ttk.Button(pt_btn_row, text="Add Wait", command=self.add_window_wait).pack(side="left", padx=2)
         ttk.Button(pt_btn_row, text="Remove", command=self.remove_window_position).pack(side="left", padx=2)
         ttk.Button(pt_btn_row, text="Up", width=4, command=lambda: self.move_window_position(-1)).pack(side="left", padx=2)
         ttk.Button(pt_btn_row, text="Down", width=5, command=lambda: self.move_window_position(1)).pack(side="left", padx=2)
@@ -718,6 +735,8 @@ class ClickerApp:
         
         if current_tab == 1 and not is_clicking:
             for p in self._window_positions:
+                if p["type"] != "click":
+                    continue
                 hwnd = p.get("hwnd")
                 if hwnd and user32.IsWindow(hwnd):
                     if user32.IsIconic(hwnd):
@@ -852,6 +871,7 @@ class ClickerApp:
                           on_click=self._on_screen_dot_click)
         
         self._screen_positions.append({
+            "type": "click",
             "x": x,
             "y": y,
             "delay": None,
@@ -862,7 +882,21 @@ class ClickerApp:
         self.screen_list.selection_set(index)
         self.screen_list.activate(index)
         self._on_screen_list_select()
-        self.status_var.set(f"Added screen dot {index+1} at center.")
+        self.status_var.set(f"Added screen dot at center.")
+
+    def add_screen_wait(self) -> None:
+        """Add a wait item to the screen list."""
+        index = len(self._screen_positions)
+        self._screen_positions.append({
+            "type": "wait",
+            "ms": 500
+        })
+        self._refresh_screen_list()
+        self.screen_list.selection_clear(0, "end")
+        self.screen_list.selection_set(index)
+        self.screen_list.activate(index)
+        self._on_screen_list_select()
+        self.status_var.set("Added 500ms wait.")
 
     def _on_screen_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -884,22 +918,20 @@ class ClickerApp:
         if not sel:
             return
         pos = self._screen_positions[sel[0]]
-        delay = pos["delay"]
-        self.step_delay_var.set(str(delay) if delay is not None else "")
+        if pos["type"] == "click":
+            delay = pos["delay"]
+            self.step_delay_var.set(str(delay) if delay is not None else "")
+        else:
+            self.step_delay_var.set(str(pos["ms"]))
 
     def remove_screen_position(self) -> None:
         sel = self.screen_list.curselection()
         if not sel:
             return
         index = sel[0]
-        self._screen_positions[index]["dot"].destroy()
+        if self._screen_positions[index]["type"] == "click":
+            self._screen_positions[index]["dot"].destroy()
         del self._screen_positions[index]
-        
-        # Update sequence numbers for remaining dots
-        for i in range(index, len(self._screen_positions)):
-            self._screen_positions[i]["dot"].index = i
-            self._screen_positions[i]["dot"].set_number(i + 1)
-            
         self._refresh_screen_list()
 
     def move_screen_position(self, delta: int) -> None:
@@ -911,18 +943,10 @@ class ClickerApp:
         if not 0 <= target < len(self._screen_positions):
             return
             
-        # Swap in the data list
         self._screen_positions[index], self._screen_positions[target] = (
             self._screen_positions[target],
             self._screen_positions[index],
         )
-        
-        # Sync dot indices and labels
-        self._screen_positions[index]["dot"].index = index
-        self._screen_positions[index]["dot"].set_number(index + 1)
-        self._screen_positions[target]["dot"].index = target
-        self._screen_positions[target]["dot"].set_number(target + 1)
-        
         self._refresh_screen_list()
         self.screen_list.selection_set(target)
         self.screen_list.activate(target)
@@ -930,14 +954,24 @@ class ClickerApp:
 
     def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
-            p["dot"].destroy()
+            if p["type"] == "click":
+                p["dot"].destroy()
         self._screen_positions.clear()
         self._refresh_screen_list()
 
     def _refresh_screen_list(self) -> None:
         self.screen_list.delete(0, "end")
-        for i in range(len(self._screen_positions)):
-            self._refresh_screen_list_item(i, append=True)
+        dot_count = 0
+        for i, item in enumerate(self._screen_positions):
+            if item["type"] == "click":
+                dot_count += 1
+                item["dot"].index = i
+                item["dot"].set_number(dot_count)
+                delay_str = f" [Wait: {item['delay']}ms]" if item['delay'] is not None else ""
+                text = f"{i+1}: Click ({int(item['x'])}, {int(item['y'])}){delay_str}"
+            else:
+                text = f"{i+1}: Wait {item['ms']}ms"
+            self.screen_list.insert("end", text)
 
     def _refresh_screen_list_item(self, index, append=False):
         pos = self._screen_positions[index]
@@ -980,6 +1014,7 @@ class ClickerApp:
                           on_click=self._on_window_dot_click, hwnd=hwnd)
         
         self._window_positions.append({
+            "type": "click",
             "x": rel_x,
             "y": rel_y,
             "delay": None,
@@ -993,7 +1028,21 @@ class ClickerApp:
         self.target_win_list.selection_set(win_idx)
         self.target_win_list.activate(win_idx)
         
-        self.status_var.set(f"Added window dot {index+1} for '{win_data['title']}'.")
+        self.status_var.set(f"Added window dot for '{win_data['title']}'.")
+
+    def add_window_wait(self) -> None:
+        """Add a wait item to the window list."""
+        index = len(self._window_positions)
+        self._window_positions.append({
+            "type": "wait",
+            "ms": 500
+        })
+        self._refresh_window_pt_list()
+        self.window_pt_list.selection_clear(0, "end")
+        self.window_pt_list.selection_set(index)
+        self.window_pt_list.activate(index)
+        self._on_window_list_select()
+        self.status_var.set("Added 500ms wait.")
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1016,22 +1065,20 @@ class ClickerApp:
         if not sel:
             return
         pos = self._window_positions[sel[0]]
-        delay = pos["delay"]
-        self.step_delay_var.set(str(delay) if delay is not None else "")
+        if pos["type"] == "click":
+            delay = pos["delay"]
+            self.step_delay_var.set(str(delay) if delay is not None else "")
+        else:
+            self.step_delay_var.set(str(pos["ms"]))
 
     def remove_window_position(self) -> None:
         sel = self.window_pt_list.curselection()
         if not sel:
             return
         index = sel[0]
-        self._window_positions[index]["dot"].destroy()
+        if self._window_positions[index]["type"] == "click":
+            self._window_positions[index]["dot"].destroy()
         del self._window_positions[index]
-        
-        # Update sequence numbers for remaining dots
-        for i in range(index, len(self._window_positions)):
-            self._window_positions[i]["dot"].index = i
-            self._window_positions[i]["dot"].set_number(i + 1)
-            
         self._refresh_window_pt_list()
 
     def move_window_position(self, delta: int) -> None:
@@ -1047,12 +1094,6 @@ class ClickerApp:
             self._window_positions[target],
             self._window_positions[index],
         )
-        
-        self._window_positions[index]["dot"].index = index
-        self._window_positions[index]["dot"].set_number(index + 1)
-        self._window_positions[target]["dot"].index = target
-        self._window_positions[target]["dot"].set_number(target + 1)
-        
         self._refresh_window_pt_list()
         self.window_pt_list.selection_set(target)
         self.window_pt_list.activate(target)
@@ -1060,14 +1101,25 @@ class ClickerApp:
 
     def clear_window_positions(self) -> None:
         for p in self._window_positions:
-            p["dot"].destroy()
+            if p["type"] == "click":
+                p["dot"].destroy()
         self._window_positions.clear()
         self._refresh_window_pt_list()
 
     def _refresh_window_pt_list(self) -> None:
         self.window_pt_list.delete(0, "end")
-        for i in range(len(self._window_positions)):
-            self._refresh_window_pt_item(i, append=True)
+        dot_count = 0
+        for i, item in enumerate(self._window_positions):
+            if item["type"] == "click":
+                dot_count += 1
+                item["dot"].index = i
+                item["dot"].set_number(dot_count)
+                delay_str = f" [Wait: {item['delay']}ms]" if item['delay'] is not None else ""
+                title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
+                text = f"{i+1}: [{title}] ({int(item['x'])}, {int(item['y'])}){delay_str}"
+            else:
+                text = f"{i+1}: Wait {item['ms']}ms"
+            self.window_pt_list.insert("end", text)
 
     def _refresh_window_pt_item(self, index, append=False):
         pos = self._window_positions[index]
@@ -1101,18 +1153,25 @@ class ClickerApp:
         val = self.step_delay_var.get().strip()
         index = sel[0]
         if not val:
-            positions[index]["delay"] = None
+            if positions[index]["type"] == "click":
+                positions[index]["delay"] = None
+            else:
+                positions[index]["ms"] = 0
         else:
             try:
                 ms = int(val)
                 if ms < 0: raise ValueError
-                positions[index]["delay"] = ms
+                if positions[index]["type"] == "click":
+                    positions[index]["delay"] = ms
+                else:
+                    positions[index]["ms"] = ms
             except ValueError:
                 messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds.")
                 return
         
-        refresh_fn(index)
-        self.status_var.set(f"Updated delay for item {index+1}.")
+        if current_tab == 0: self._refresh_screen_list()
+        else: self._refresh_window_pt_list()
+        self.status_var.set(f"Updated wait time for item {index+1}.")
 
     def collect_script_data(self) -> dict:
         """Return the current GUI state in the script JSON format."""
@@ -1122,19 +1181,26 @@ class ClickerApp:
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
             "screen_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
+                {"type": p["type"], "x": p.get("x"), "y": p.get("y"), "delay": p.get("delay"), "ms": p.get("ms")}
                 for p in self._screen_positions
             ],
             "target_windows": [w["title"] for w in self._target_windows],
             "window_positions": [
                 {
-                    "x": p["x"],
-                    "y": p["y"],
-                    "delay": p["delay"],
-                    "win_title": p["win_title"]
+                    "type": p["type"],
+                    "x": p.get("x"),
+                    "y": p.get("y"),
+                    "delay": p.get("delay"),
+                    "ms": p.get("ms"),
+                    "win_title": p.get("win_title")
                 }
                 for p in self._window_positions
             ],
+            # Unified action list for execution
+            "actions": [
+                {k: v for k, v in p.items() if k != "dot"} 
+                for p in (self._screen_positions if current_tab == 0 else self._window_positions)
+            ]
         })
 
     def apply_script_data(self, data: dict, source_path: str | None = None, show_warnings: bool = True) -> None:
@@ -1152,21 +1218,28 @@ class ClickerApp:
         self.notebook.select(0 if mode == "screen" else 1)
 
         for p_data in data.get("screen_positions", []):
-            idx = len(self._screen_positions)
-            dot = DraggableDot(
-                self.root,
-                idx,
-                p_data["x"],
-                p_data["y"],
-                self._on_screen_dot_move,
-                on_click=self._on_screen_dot_click,
-            )
-            self._screen_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot,
-            })
+            if p_data.get("type", "click") == "click":
+                idx = len(self._screen_positions)
+                dot = DraggableDot(
+                    self.root,
+                    idx,
+                    p_data["x"],
+                    p_data["y"],
+                    self._on_screen_dot_move,
+                    on_click=self._on_screen_dot_click,
+                )
+                self._screen_positions.append({
+                    "type": "click",
+                    "x": p_data["x"],
+                    "y": p_data["y"],
+                    "delay": p_data.get("delay"),
+                    "dot": dot,
+                })
+            else:
+                self._screen_positions.append({
+                    "type": "wait",
+                    "ms": p_data.get("ms", 500)
+                })
         self._refresh_screen_list()
 
         active_windows = list_visible_windows()
@@ -1181,26 +1254,33 @@ class ClickerApp:
         self._refresh_window_list()
 
         for p_data in data.get("window_positions", []):
-            win_title = p_data["win_title"]
-            found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
-            idx = len(self._window_positions)
-            dot = DraggableDot(
-                self.root,
-                idx,
-                p_data["x"],
-                p_data["y"],
-                self._on_window_dot_move,
-                on_click=self._on_window_dot_click,
-                hwnd=found_hwnd,
-            )
-            self._window_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot,
-                "hwnd": found_hwnd,
-                "win_title": win_title,
-            })
+            if p_data.get("type", "click") == "click":
+                win_title = p_data["win_title"]
+                found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
+                idx = len(self._window_positions)
+                dot = DraggableDot(
+                    self.root,
+                    idx,
+                    p_data["x"],
+                    p_data["y"],
+                    self._on_window_dot_move,
+                    on_click=self._on_window_dot_click,
+                    hwnd=found_hwnd,
+                )
+                self._window_positions.append({
+                    "type": "click",
+                    "x": p_data["x"],
+                    "y": p_data["y"],
+                    "delay": p_data.get("delay"),
+                    "dot": dot,
+                    "hwnd": found_hwnd,
+                    "win_title": win_title,
+                })
+            else:
+                self._window_positions.append({
+                    "type": "wait",
+                    "ms": p_data.get("ms", 500)
+                })
         self._refresh_window_pt_list()
         self._on_tab_changed(None)
 
@@ -1222,9 +1302,8 @@ class ClickerApp:
         # Center dialog relative to main window
         self.root.update_idletasks()
         dialog.update_idletasks()
-        # Use a reasonable default size if not yet rendered, or use reqwidth/height
-        width = 450
-        height = 350
+        width = 480
+        height = 420
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (width // 2)
         y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (height // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -1360,23 +1439,17 @@ class ClickerApp:
 
         self._stop_event.clear()
         
-        # Snapshot positions for the thread
-        positions_snapshot = []
+        # Snapshot actions for the thread
+        actions_snapshot = []
         for p in positions:
-            snapshot = {
-                "x": p["x"],
-                "y": p["y"],
-                "delay": p["delay"]
-            }
-            if mode == "window":
-                snapshot["hwnd"] = p["hwnd"]
-            positions_snapshot.append(snapshot)
+            snapshot = {k: v for k, v in p.items() if k != "dot"}
+            actions_snapshot.append(snapshot)
             
         # Hide dots while clicking to avoid blocking
         self._set_dots_visible(False)
         
         self._click_thread = threading.Thread(
-            target=self._click_loop, args=(global_interval, positions_snapshot, mode), daemon=True
+            target=self._click_loop, args=(global_interval, actions_snapshot, mode), daemon=True
         )
         self._click_thread.start()
         
@@ -1404,24 +1477,31 @@ class ClickerApp:
                 self._stop_event.set()
                 break
 
-    def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str) -> None:
+    def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str) -> None:
         while not self._stop_event.is_set():
-            for pos in positions:
+            for action in actions:
                 if self._stop_event.is_set():
                     break
                 
-                if mode == "window":
-                    if not click_window_position(pos["hwnd"], pos["x"], pos["y"]):
-                        continue
-                else:
-                    self._click_at(pos["x"], pos["y"])
+                action_type = action.get("type", "click")
+                if action_type == "click":
+                    if mode == "window":
+                        if not click_window_position(action["hwnd"], action["x"], action["y"]):
+                            pass # Or continue
+                    else:
+                        self._click_at(action["x"], action["y"])
 
-                # Determine wait time: per-step delay or global interval
-                delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
-                wait_s = delay_ms / 1000.0
-                
-                if wait_s > 0 and self._stop_event.wait(wait_s):
-                    break
+                    # Determine wait time: per-step delay or global interval
+                    delay_ms = action.get("delay")
+                    if delay_ms is None:
+                        delay_ms = global_interval_ms
+                    
+                    if delay_ms > 0 and self._stop_event.wait(delay_ms / 1000.0):
+                        break
+                elif action_type == "wait":
+                    wait_ms = action.get("ms", 0)
+                    if wait_ms > 0 and self._stop_event.wait(wait_ms / 1000.0):
+                        break
             
             # If loop is disabled, stop after one full pass
             if not self.loop_var.get():
