@@ -1,5 +1,9 @@
 import ctypes
 from ctypes import wintypes
+import argparse
+from datetime import datetime
+import os
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -185,6 +189,12 @@ kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
 
 DOT_SIZE = 40
+APP_NAME = "ClickTool"
+AUTO_CONFIG_FILENAME = "auto_config.json"
+AUTO_LOG_DIRNAME = "logs"
+DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
+DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
+DEFAULT_TARGET_WAIT_SECONDS = 60
 
 class RECT(ctypes.Structure):
     _fields_ = [
@@ -233,6 +243,166 @@ def client_to_screen(hwnd, x, y):
     pt = POINT(x, y)
     user32.ClientToScreen(hwnd, ctypes.byref(pt))
     return pt.x, pt.y
+
+
+def get_client_bounds_in_window(hwnd):
+    rect = get_window_rect(hwnd)
+    client_rect = get_client_rect(hwnd)
+    if not rect or not client_rect:
+        return None
+    client_left, client_top = client_to_screen(hwnd, client_rect[0], client_rect[1])
+    left = client_left - rect[0]
+    top = client_top - rect[1]
+    return (left, top, left + client_rect[2] - client_rect[0], top + client_rect[3] - client_rect[1])
+
+
+def clamp_window_position(hwnd: int, x: int, y: int) -> tuple[int, int]:
+    bounds = get_client_bounds_in_window(hwnd)
+    if bounds is None:
+        rect = get_window_rect(hwnd)
+        if not rect:
+            return int(x), int(y)
+        bounds = (0, 0, rect[2] - rect[0], rect[3] - rect[1])
+    return (max(bounds[0], min(int(x), bounds[2])), max(bounds[1], min(int(y), bounds[3])))
+
+
+def get_app_data_dir() -> str:
+    base_dir = os.environ.get("LOCALAPPDATA")
+    if not base_dir:
+        base_dir = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    return os.path.join(base_dir, APP_NAME)
+
+
+def get_auto_config_path() -> str:
+    return os.path.join(get_app_data_dir(), AUTO_CONFIG_FILENAME)
+
+
+def get_auto_log_path() -> str:
+    log_dir = os.path.join(get_app_data_dir(), AUTO_LOG_DIRNAME)
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "auto-minified.log")
+
+
+def write_auto_log(log_path: str | None, message: str) -> None:
+    if not log_path:
+        return
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
+
+
+def coerce_non_negative_int(value, default: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, value)
+
+
+def normalize_script_data(data: dict) -> dict:
+    if "mode" not in data:
+        data["mode"] = "window" if data.get("window_positions") else "screen"
+    settings = data.setdefault("settings", {})
+    settings["window_client_area_only"] = True
+    auto = data.setdefault("auto", {})
+    auto["loop_timeout_seconds"] = coerce_non_negative_int(
+        auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
+    )
+    auto["loop_max_rounds"] = coerce_non_negative_int(
+        auto.get("loop_max_rounds"), DEFAULT_AUTO_LOOP_MAX_ROUNDS
+    )
+    auto["target_wait_seconds"] = coerce_non_negative_int(
+        auto.get("target_wait_seconds"), DEFAULT_TARGET_WAIT_SECONDS
+    )
+    return data
+
+
+def read_script_file(file_path: str) -> dict:
+    with open(file_path, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    normalize_script_data(data)
+    return data
+
+
+def write_script_file(file_path: str, data: dict) -> None:
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def list_visible_windows() -> list[tuple[int, str]]:
+    windows: list[tuple[int, str]] = []
+
+    def enum_callback(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            title = get_window_title(hwnd)
+            if title:
+                windows.append((hwnd, title))
+        return True
+
+    user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+    return windows
+
+
+def find_windows_by_titles(titles: list[str]) -> dict[str, int]:
+    active_windows = list_visible_windows()
+    found: dict[str, int] = {}
+    for title in titles:
+        hwnd = next((h for h, t in active_windows if t == title), None)
+        if hwnd is None:
+            title_lower = title.lower()
+            hwnd = next((h for h, t in active_windows if title_lower in t.lower()), None)
+        if hwnd:
+            found[title] = hwnd
+    return found
+
+
+def wait_for_windows(titles: list[str], timeout_seconds: int, log_path: str | None = None) -> dict[str, int]:
+    if not titles:
+        return {}
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        found = find_windows_by_titles(titles)
+        missing = [title for title in titles if title not in found]
+        write_auto_log(log_path, f"waiting for windows; found={list(found.keys())}; missing={missing}")
+        if not missing:
+            return found
+        if timeout_seconds <= 0 or time.monotonic() >= deadline:
+            return found
+        time.sleep(1)
+
+
+def click_window_position(hwnd: int, x: int, y: int) -> bool:
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
+    rect = get_window_rect(hwnd)
+    bounds = get_client_bounds_in_window(hwnd)
+    if not rect or not bounds:
+        return False
+    if not (bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]):
+        return False
+
+    sx = int(rect[0] + x)
+    sy = int(rect[1] + y)
+    cl_tl = POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(cl_tl))
+    cx = int(sx - cl_tl.x)
+    cy = int(sy - cl_tl.y)
+    target_hwnd = user32.ChildWindowFromPointEx(hwnd, POINT(cx, cy), CWP_SKIPINVISIBLE) or hwnd
+
+    t_cl_tl = POINT(0, 0)
+    user32.ClientToScreen(target_hwnd, ctypes.byref(t_cl_tl))
+    tx = int(sx - t_cl_tl.x)
+    ty = int(sy - t_cl_tl.y)
+    lparam = makelong(tx, ty)
+    user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
+    user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, lparam)
+    return True
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
@@ -303,12 +473,11 @@ class DraggableDot(tk.Toplevel):
         if self.hwnd:
             rect = get_window_rect(self.hwnd)
             if rect:
-                # Constrain within window rect
-                new_screen_x = max(rect[0], min(new_screen_x, rect[2]))
-                new_screen_y = max(rect[1], min(new_screen_y, rect[3]))
-                
                 rel_x = new_screen_x - rect[0]
                 rel_y = new_screen_y - rect[1]
+                rel_x, rel_y = clamp_window_position(self.hwnd, rel_x, rel_y)
+                new_screen_x = rect[0] + rel_x
+                new_screen_y = rect[1] + rel_y
                 self.update_position(new_screen_x, new_screen_y)
                 self.on_move(self.index, rel_x, rel_y)
             else:
@@ -324,12 +493,14 @@ class ClickerApp:
         enable_dpi_awareness()
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(560, 430)
 
         self.interval_var = tk.StringVar(value="500")
         self.step_delay_var = tk.StringVar()
         self.loop_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
+        self._active_mode = "screen"
         
         # Screen Mode State
         self._screen_positions: list[dict] = []
@@ -352,45 +523,52 @@ class ClickerApp:
         self.notebook.pack(fill="both", expand=True)
         
         # Screen Mode Tab
-        self.screen_frame = ttk.Frame(self.notebook, padding=16)
+        self.screen_frame = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self.screen_frame, text="Screen Mode")
         self._build_screen_mode_ui(self.screen_frame)
-        
+
         # Window Mode Tab
-        self.window_frame = ttk.Frame(self.notebook, padding=16)
+        self.window_frame = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self.window_frame, text="Window Mode")
         self._build_window_mode_ui(self.window_frame)
+
+        self.settings_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.settings_frame, text="Settings")
+        self._build_settings_ui(self.settings_frame)
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Global Run controls and Status
-        bottom_frame = ttk.Frame(self.root, padding=(16, 0, 16, 16))
+        bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
         bottom_frame.pack(fill="x")
-        
-        ttk.Label(bottom_frame, text="Global Interval (ms)").grid(row=0, column=0, sticky="w")
-        ttk.Entry(bottom_frame, textvariable=self.interval_var, width=12).grid(
-            row=0, column=1, padx=(8, 0), sticky="w"
-        )
-        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(12, 0))
-        
-        run_row = ttk.Frame(bottom_frame)
-        run_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        self.start_button = ttk.Button(run_row, text="Start", command=self.start_clicking)
-        self.start_button.grid(row=0, column=0, padx=(0, 8))
-        self.stop_button = ttk.Button(run_row, text="Stop", command=self.stop_clicking, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=(0, 8))
-        
-        ttk.Button(run_row, text="Import Script", command=self.import_script).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(run_row, text="Export Script", command=self.export_script).grid(row=0, column=3, padx=(4, 0))
+        bottom_frame.columnconfigure(6, weight=1)
+
+        ttk.Label(bottom_frame, text="Interval").grid(row=0, column=0, sticky="w")
+        ttk.Entry(bottom_frame, textvariable=self.interval_var, width=8).grid(row=0, column=1, padx=(4, 8), sticky="w")
+        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(0, 8))
+        self.start_button = ttk.Button(bottom_frame, text="Start", command=self.start_clicking, width=8)
+        self.start_button.grid(row=0, column=3, padx=(0, 4))
+        self.stop_button = ttk.Button(bottom_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
+        self.stop_button.grid(row=0, column=4, padx=(0, 8))
+        ttk.Button(bottom_frame, text="Import", command=self.import_script).grid(row=0, column=5, padx=(0, 4))
+        ttk.Button(bottom_frame, text="Export", command=self.export_script).grid(row=0, column=6, sticky="w", padx=(0, 4))
+        ttk.Button(bottom_frame, text="Save Auto", command=self.save_current_to_auto).grid(row=0, column=7)
 
         ttk.Label(bottom_frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(12, 0)
+            row=1, column=0, columnspan=8, sticky="w", pady=(6, 0)
         )
+
+    def _build_settings_ui(self, frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        info = ttk.LabelFrame(frame, text="Window Mode", padding=10)
+        info.grid(row=0, column=0, sticky="ew")
+        ttk.Label(info, text="Window Mode is client-area only in the minified build.").grid(row=0, column=0, sticky="w")
         ttk.Label(
-            bottom_frame,
-            text="Drag dots to set positions. Press Esc to stop clicking.",
-            foreground="#666666",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            info,
+            text="Title bars, minimize, maximize, and close buttons are intentionally unsupported to keep clicks pure background and dependency-free.",
+            foreground="#555555",
+            wraplength=500,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
     def _build_screen_mode_ui(self, frame) -> None:
         # Row 1: Position List Label
@@ -402,7 +580,7 @@ class ClickerApp:
         list_frame = ttk.Frame(frame)
         list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
         self.screen_list = tk.Listbox(
-            list_frame, height=8, width=50, activestyle="dotbox"
+            list_frame, height=9, width=56, activestyle="dotbox"
         )
         self.screen_list.grid(row=0, column=0)
         self.screen_list.bind("<<ListboxSelect>>", self._on_screen_list_select)
@@ -448,7 +626,7 @@ class ClickerApp:
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.target_win_list = tk.Listbox(win_list_frame, height=10, width=30)
+        self.target_win_list = tk.Listbox(win_list_frame, height=12, width=28)
         self.target_win_list.pack(side="left", fill="both", expand=True)
         
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
@@ -469,7 +647,7 @@ class ClickerApp:
         pt_list_frame = ttk.Frame(pt_frame)
         pt_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.window_pt_list = tk.Listbox(pt_list_frame, height=10, width=40)
+        self.window_pt_list = tk.Listbox(pt_list_frame, height=12, width=44)
         self.window_pt_list.pack(side="left", fill="both", expand=True)
         self.window_pt_list.bind("<<ListboxSelect>>", self._on_window_list_select)
         
@@ -502,11 +680,15 @@ class ClickerApp:
             
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0: # Screen
+            self._active_mode = "screen"
             for p in self._screen_positions: p["dot"].deiconify()
             for p in self._window_positions: p["dot"].withdraw()
-        else: # Window
+        elif current_tab == 1: # Window
+            self._active_mode = "window"
             for p in self._screen_positions: p["dot"].withdraw()
             for p in self._window_positions: p["dot"].deiconify()
+        else:
+            self._set_dots_visible(False)
             
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
@@ -523,12 +705,7 @@ class ClickerApp:
                     else:
                         rect = get_window_rect(hwnd)
                         if rect:
-                            # Clamp relative coordinates to current window size
-                            ww = rect[2] - rect[0]
-                            wh = rect[3] - rect[1]
-                            p["x"] = max(0, min(p["x"], ww))
-                            p["y"] = max(0, min(p["y"], wh))
-                            
+                            p["x"], p["y"] = clamp_window_position(hwnd, p["x"], p["y"])
                             sx = rect[0] + p["x"]
                             sy = rect[1] + p["y"]
                             p["dot"].deiconify()
@@ -537,21 +714,21 @@ class ClickerApp:
                             p["dot"].withdraw()
                 else:
                     p["dot"].withdraw()
-        
+
         self.root.after(100, self.sync_dots_loop)
 
     def add_target_window(self):
         """Open a dialog to select a window from all visible windows."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Select Window (Auto-refreshing)")
-        dialog.geometry("400x500")
+        dialog.geometry("460x420")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        ttk.Label(dialog, text="Select a window from the list:").pack(pady=8)
-        
+        ttk.Label(dialog, text="Select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
+
         list_frame = ttk.Frame(dialog)
-        list_frame.pack(fill="both", expand=True, padx=8)
+        list_frame.pack(fill="both", expand=True, padx=10)
         
         lb = tk.Listbox(list_frame)
         lb.pack(side="left", fill="both", expand=True)
@@ -615,8 +792,10 @@ class ClickerApp:
                     self.target_win_list.activate(new_idx)
                 dialog.destroy()
         
-        ttk.Button(dialog, text="Select", command=on_select).pack(pady=8)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack(pady=(0, 8))
+        button_row = ttk.Frame(dialog)
+        button_row.pack(fill="x", padx=10, pady=8)
+        ttk.Button(button_row, text="Select", command=on_select).pack(side="right")
+        ttk.Button(button_row, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
     def _refresh_window_list(self):
         self.target_win_list.delete(0, "end")
@@ -918,11 +1097,16 @@ class ClickerApp:
             
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0:
+            self._active_mode = "screen"
             positions = self._screen_positions
             mode = "screen"
-        else:
+        elif current_tab == 1:
+            self._active_mode = "window"
             positions = self._window_positions
             mode = "window"
+        else:
+            mode = self._active_mode
+            positions = self._screen_positions if mode == "screen" else self._window_positions
             
         if not positions:
             messagebox.showerror("No positions", "Add at least one dot first.")
@@ -994,32 +1178,7 @@ class ClickerApp:
                     if user32.IsWindow(hwnd):
                         rect = get_window_rect(hwnd)
                         if rect:
-                            # Screen coordinate of the click point
-                            sx = rect[0] + pos["x"]
-                            sy = rect[1] + pos["y"]
-                            
-                            # Screen coordinate of client area top-left
-                            cl_tl = POINT(0, 0)
-                            user32.ClientToScreen(hwnd, ctypes.byref(cl_tl))
-                            
-                            # Client-relative coordinates
-                            cx = int(sx - cl_tl.x)
-                            cy = int(sy - cl_tl.y)
-                            
-                            # Find the actual child window at these client coordinates
-                            target_hwnd = user32.ChildWindowFromPointEx(hwnd, POINT(cx, cy), CWP_SKIPINVISIBLE)
-                            if not target_hwnd:
-                                target_hwnd = hwnd
-                                
-                            # Convert to target_hwnd's own client coordinates
-                            t_cl_tl = POINT(0, 0)
-                            user32.ClientToScreen(target_hwnd, ctypes.byref(t_cl_tl))
-                            tx = int(sx - t_cl_tl.x)
-                            ty = int(sy - t_cl_tl.y)
-                            
-                            lparam = makelong(tx, ty)
-                            user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-                            user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, lparam)
+                            click_window_position(hwnd, pos["x"], pos["y"])
                         else:
                             continue
                     else:
@@ -1052,25 +1211,22 @@ class ClickerApp:
 
     def export_script(self):
         """Save the current configuration to a JSON file."""
-        data = {
+        data = normalize_script_data({
+            "mode": self._active_mode,
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
+            "settings": {"window_client_area_only": True},
             "screen_positions": [
                 {"x": p["x"], "y": p["y"], "delay": p["delay"]}
                 for p in self._screen_positions
             ],
             "target_windows": [w["title"] for w in self._target_windows],
             "window_positions": [
-                {
-                    "x": p["x"],
-                    "y": p["y"],
-                    "delay": p["delay"],
-                    "win_title": p["win_title"]
-                }
+                {"x": p["x"], "y": p["y"], "delay": p["delay"], "win_title": p["win_title"]}
                 for p in self._window_positions
-            ]
-        }
-        
+            ],
+        })
+
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -1078,8 +1234,7 @@ class ClickerApp:
         )
         if file_path:
             try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=4, ensure_ascii=False)
+                write_script_file(file_path, normalize_script_data(data))
                 messagebox.showinfo("Export Successful", f"Script saved to {file_path}")
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to save script: {e}")
@@ -1094,8 +1249,7 @@ class ClickerApp:
             return
             
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = read_script_file(file_path)
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to read script: {e}")
             return
@@ -1172,6 +1326,30 @@ class ClickerApp:
         
         self.status_var.set(f"Imported script from {file_path}")
 
+    def save_current_to_auto(self) -> None:
+        config_path = get_auto_config_path()
+        data = normalize_script_data({
+            "mode": self._active_mode,
+            "global_interval": self.interval_var.get(),
+            "loop": self.loop_var.get(),
+            "settings": {"window_client_area_only": True},
+            "screen_positions": [
+                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
+                for p in self._screen_positions
+            ],
+            "target_windows": [w["title"] for w in self._target_windows],
+            "window_positions": [
+                {"x": p["x"], "y": p["y"], "delay": p["delay"], "win_title": p["win_title"]}
+                for p in self._window_positions
+            ],
+        })
+        try:
+            write_script_file(config_path, data)
+        except Exception as e:
+            messagebox.showerror("Auto Config Error", f"Failed to save auto config: {e}")
+            return
+        self.status_var.set(f"Auto config saved to {config_path}")
+
     def on_close(self) -> None:
         self._stop_event.set()
         self.root.destroy()
@@ -1180,5 +1358,103 @@ class ClickerApp:
         self.root.mainloop()
 
 
-if __name__ == "__main__":
+def run_auto_config(config_path: str, log_path: str | None = None) -> int:
+    write_auto_log(log_path, f"auto run started; config={config_path}")
+    if not os.path.exists(config_path):
+        write_auto_log(log_path, "auto config not found; exit=2")
+        return 2
+    try:
+        data = read_script_file(config_path)
+    except Exception as e:
+        write_auto_log(log_path, f"failed to read config: {e}; exit=2")
+        return 2
+
+    mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+    loop_enabled = bool(data.get("loop", True))
+    global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
+    auto = data.get("auto", {})
+    timeout_seconds = coerce_non_negative_int(auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS)
+    max_rounds = coerce_non_negative_int(auto.get("loop_max_rounds"), DEFAULT_AUTO_LOOP_MAX_ROUNDS)
+    target_wait_seconds = coerce_non_negative_int(auto.get("target_wait_seconds"), DEFAULT_TARGET_WAIT_SECONDS)
+    if loop_enabled and timeout_seconds == 0 and max_rounds == 0:
+        timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
+        max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
+
+    write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
+
+    if mode == "window":
+        titles = set(data.get("target_windows", []))
+        titles.update(p.get("win_title") for p in data.get("window_positions", []) if p.get("win_title"))
+        titles = sorted(titles)
+        window_map = wait_for_windows(titles, target_wait_seconds, log_path)
+        actions = []
+        for p in data.get("window_positions", []):
+            hwnd = window_map.get(p.get("win_title"))
+            if hwnd:
+                actions.append({"type": "click", "hwnd": hwnd, "x": p["x"], "y": p["y"], "delay": p.get("delay"), "win_title": p.get("win_title")})
+            else:
+                write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
+    else:
+        actions = [
+            {"type": "click", "x": p["x"], "y": p["y"], "delay": p.get("delay")}
+            for p in data.get("screen_positions", [])
+        ]
+
+    if not actions:
+        write_auto_log(log_path, "no runnable actions; exit=3")
+        return 3
+
+    deadline = time.monotonic() + timeout_seconds if loop_enabled and timeout_seconds > 0 else None
+    rounds = 0
+    while True:
+        clicks = 0
+        for action in actions:
+            if deadline is not None and time.monotonic() >= deadline:
+                write_auto_log(log_path, "loop timeout reached; exit=0")
+                return 0
+            if mode == "window":
+                if click_window_position(action["hwnd"], action["x"], action["y"]):
+                    clicks += 1
+                    write_auto_log(log_path, f"clicked window title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                else:
+                    write_auto_log(log_path, f"skipped window click outside client area title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+            else:
+                send_mouse_click(int(action["x"]), int(action["y"]))
+                clicks += 1
+                write_auto_log(log_path, f"clicked screen x={action.get('x')} y={action.get('y')}")
+            delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+        rounds += 1
+        write_auto_log(log_path, f"finished round {rounds}; clicks={clicks}")
+        if not loop_enabled:
+            write_auto_log(log_path, "loop disabled; exit=0")
+            return 0
+        if max_rounds > 0 and rounds >= max_rounds:
+            write_auto_log(log_path, "max rounds reached; exit=0")
+            return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Mouse Click Tool Minified")
+    parser.add_argument("--auto", action="store_true", help="Run saved auto startup config")
+    parser.add_argument("--silent", action="store_true", help="Suppress UI messages in automation mode")
+    parser.add_argument("--config", help="Optional config path for --auto")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.auto:
+        log_path = get_auto_log_path()
+        config_path = args.config or get_auto_config_path()
+        write_auto_log(log_path, f"process started; argv={argv if argv is not None else sys.argv[1:]}")
+        result = run_auto_config(config_path, log_path)
+        write_auto_log(log_path, f"process finished; exit={result}")
+        return result
     ClickerApp().run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
