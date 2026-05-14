@@ -107,6 +107,7 @@ AUTO_CONFIG_FILENAME = "auto_config.json"
 DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
 DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
+DEFAULT_PURE_BACKGROUND_WINDOW_CLICK = False
 ERROR_ALREADY_EXISTS = 183
 
 class RECT(ctypes.Structure):
@@ -158,6 +159,27 @@ def client_to_screen(hwnd, x, y):
     return pt.x, pt.y
 
 
+def get_client_bounds_in_window(hwnd):
+    rect = get_window_rect(hwnd)
+    client_rect = get_client_rect(hwnd)
+    if not rect or not client_rect:
+        return None
+    client_left, client_top = client_to_screen(hwnd, client_rect[0], client_rect[1])
+    left = client_left - rect[0]
+    top = client_top - rect[1]
+    return (left, top, left + client_rect[2] - client_rect[0], top + client_rect[3] - client_rect[1])
+
+
+def clamp_window_position(hwnd: int, x: int, y: int, pure_background: bool = False) -> tuple[int, int]:
+    bounds = get_client_bounds_in_window(hwnd) if pure_background else None
+    if bounds is None:
+        rect = get_window_rect(hwnd)
+        if not rect:
+            return int(x), int(y)
+        bounds = (0, 0, rect[2] - rect[0], rect[3] - rect[1])
+    return (max(bounds[0], min(int(x), bounds[2])), max(bounds[1], min(int(y), bounds[3])))
+
+
 def get_auto_config_path() -> str:
     base_dir = os.environ.get("LOCALAPPDATA")
     if not base_dir:
@@ -183,6 +205,11 @@ def write_script_file(file_path: str, data: dict) -> None:
 def normalize_script_data(data: dict) -> dict:
     if "mode" not in data:
         data["mode"] = "window" if data.get("window_positions") else "screen"
+
+    settings = data.setdefault("settings", {})
+    settings["pure_background_window_click"] = bool(
+        settings.get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+    )
 
     auto = data.setdefault("auto", {})
     auto["loop_timeout_seconds"] = coerce_non_negative_int(
@@ -251,7 +278,7 @@ def wait_for_windows(titles: list[str], timeout_seconds: int) -> dict[str, int]:
         time.sleep(1)
 
 
-def click_window_position(hwnd: int, x: int, y: int) -> bool:
+def click_window_position(hwnd: int, x: int, y: int, pure_background: bool = False) -> bool:
     if not hwnd or not user32.IsWindow(hwnd):
         return False
 
@@ -259,75 +286,49 @@ def click_window_position(hwnd: int, x: int, y: int) -> bool:
     if not rect:
         return False
 
-    sx = rect[0] + x
-    sy = rect[1] + y
-    
-    # 1. Find the deepest child window that contains this screen point.
-    # Many modern apps put interactive content (tabs, search bars) in what appears to be the title bar.
-    # ChildWindowFromPoint often misses these if they are not in the main client area.
+    sx = int(rect[0] + x)
+    sy = int(rect[1] + y)
     target_hwnd = hwnd
     best_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
-    
+
     def enum_cb(child_hwnd, lparam):
         nonlocal target_hwnd, best_area
         try:
             r = win32gui.GetWindowRect(child_hwnd)
             if r[0] <= sx < r[2] and r[1] <= sy < r[3]:
                 area = (r[2] - r[0]) * (r[3] - r[1])
-                # We prefer smaller windows (likely deeper children)
                 if area <= best_area:
                     target_hwnd = child_hwnd
                     best_area = area
-        except:
+        except Exception:
             pass
         return True
-        
+
     win32gui.EnumChildWindows(hwnd, enum_cb, None)
-    
-    # 2. Get coordinates relative to the found window's client area
+
     t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
     tx = int(sx - t_cl_tl_sx)
     ty = int(sy - t_cl_tl_sy)
-    
-    # 3. Check if it's in the client area of the found target
+
     t_cl_rect = RECT()
     user32.GetClientRect(target_hwnd, ctypes.byref(t_cl_rect))
     cw = t_cl_rect.right - t_cl_rect.left
     ch = t_cl_rect.bottom - t_cl_rect.top
-    
+
     if 0 <= tx < cw and 0 <= ty < ch:
-        # Client area click logic
         lparam = win32api.MAKELONG(tx, ty)
         win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
         win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
-    else:
-        # Non-client area click logic (Title bar, borders, etc.)
-        lparam_screen = win32api.MAKELONG(int(sx), int(sy))
-        
-        # Use SendMessageTimeout to avoid hanging if the target window is busy
-        # or enters a modal drag loop. SMTO_ABORTIFHUNG = 2.
-        try:
-            res, hit_test = win32gui.SendMessageTimeout(
-                target_hwnd, win32con.WM_NCHITTEST, 0, lparam_screen, 2, 500
-            )
-            if res == 0: hit_test = win32con.HTNOWHERE
-        except:
-            hit_test = win32con.HTNOWHERE
-        
-        if hit_test == win32con.HTCLIENT:
-            lparam = win32api.MAKELONG(tx, ty)
-            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
-            win32gui.PostMessage(target_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
-        elif hit_test == win32con.HTCAPTION:
-            # Sending NCLBUTTONDOWN on HTCAPTION can start a modal drag loop.
-            # We follow up with NCMOUSEMOVE and NCLBUTTONUP to try and satisfy the loop.
-            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
-            win32gui.PostMessage(target_hwnd, win32con.WM_NCMOUSEMOVE, hit_test, lparam_screen)
-            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
-        else:
-            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONDOWN, hit_test, lparam_screen)
-            win32gui.PostMessage(target_hwnd, win32con.WM_NCLBUTTONUP, hit_test, lparam_screen)
-            
+        return True
+
+    if pure_background:
+        return False
+
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+    pydirectinput.click(x=sx, y=sy, duration=0.05)
     return True
 
 
@@ -372,6 +373,8 @@ def run_auto_config(config_path: str) -> int:
     mode = data.get("mode", "window" if data.get("window_positions") else "screen")
     loop_enabled = bool(data.get("loop", True))
     global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
+    settings = data.get("settings", {})
+    pure_background = bool(settings.get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK))
     auto = data.get("auto", {})
     timeout_seconds = coerce_non_negative_int(
         auto.get("loop_timeout_seconds"),
@@ -432,7 +435,7 @@ def run_auto_config(config_path: str) -> int:
                 if mode == "window":
                     hwnd = window_map.get(action.get("win_title"))
                     if hwnd:
-                        click_window_position(hwnd, action["x"], action["y"])
+                        click_window_position(hwnd, action["x"], action["y"], pure_background)
                 else:
                     pydirectinput.click(x=int(action["x"]), y=int(action["y"]), duration=0.05)
                 
@@ -502,13 +505,14 @@ def main(argv: list[str] | None = None) -> int:
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
-    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None):
+    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None, pure_background=False):
         super().__init__(master)
         self.index = index  # 0-based index
         self.on_move = on_move
         self.on_click = on_click
         self.hwnd = hwnd # If set, x and y are relative to this window's top-left
-        
+        self.pure_background = pure_background
+
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.7)
@@ -569,12 +573,11 @@ class DraggableDot(tk.Toplevel):
         if self.hwnd:
             rect = get_window_rect(self.hwnd)
             if rect:
-                # Constrain within window rect
-                new_screen_x = max(rect[0], min(new_screen_x, rect[2]))
-                new_screen_y = max(rect[1], min(new_screen_y, rect[3]))
-                
                 rel_x = new_screen_x - rect[0]
                 rel_y = new_screen_y - rect[1]
+                rel_x, rel_y = clamp_window_position(self.hwnd, rel_x, rel_y, self.pure_background)
+                new_screen_x = rect[0] + rel_x
+                new_screen_y = rect[1] + rel_y
                 self.update_position(new_screen_x, new_screen_y)
                 self.on_move(self.index, rel_x, rel_y)
             else:
@@ -590,15 +593,18 @@ class ClickerApp:
         enable_dpi_awareness()
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(560, 430)
 
         self.interval_var = tk.StringVar(value="500")
         self.step_delay_var = tk.StringVar()
         self.loop_var = tk.BooleanVar(value=True)
+        self.pure_background_window_click_var = tk.BooleanVar(value=DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
         self.status_var = tk.StringVar(value="Ready")
         self.auto_loop_timeout_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS))
         self.auto_loop_max_rounds_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_MAX_ROUNDS))
-        
+        self._active_mode = "screen"
+
         # Screen Mode State
         self._screen_positions: list[dict] = []
         
@@ -620,46 +626,57 @@ class ClickerApp:
         self.notebook.pack(fill="both", expand=True)
         
         # Screen Mode Tab
-        self.screen_frame = ttk.Frame(self.notebook, padding=16)
+        self.screen_frame = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self.screen_frame, text="Screen Mode")
         self._build_screen_mode_ui(self.screen_frame)
-        
+
         # Window Mode Tab
-        self.window_frame = ttk.Frame(self.notebook, padding=16)
+        self.window_frame = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self.window_frame, text="Window Mode")
         self._build_window_mode_ui(self.window_frame)
+
+        self.settings_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.settings_frame, text="Settings")
+        self._build_settings_ui(self.settings_frame)
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Global Run controls and Status
-        bottom_frame = ttk.Frame(self.root, padding=(16, 0, 16, 16))
+        bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
         bottom_frame.pack(fill="x")
-        
-        ttk.Label(bottom_frame, text="Global Interval (ms)").grid(row=0, column=0, sticky="w")
-        ttk.Entry(bottom_frame, textvariable=self.interval_var, width=12).grid(
-            row=0, column=1, padx=(8, 0), sticky="w"
-        )
-        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(12, 0))
-        
-        run_row = ttk.Frame(bottom_frame)
-        run_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        self.start_button = ttk.Button(run_row, text="Start", command=self.start_clicking)
-        self.start_button.grid(row=0, column=0, padx=(0, 8))
-        self.stop_button = ttk.Button(run_row, text="Stop", command=self.stop_clicking, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=(0, 8))
-        
-        ttk.Button(run_row, text="Import Script", command=self.import_script).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(run_row, text="Export Script", command=self.export_script).grid(row=0, column=3, padx=(4, 0))
-        ttk.Button(run_row, text="Auto Config", command=self.open_auto_config_dialog).grid(row=0, column=4, padx=(4, 0))
+        bottom_frame.columnconfigure(6, weight=1)
+
+        ttk.Label(bottom_frame, text="Interval").grid(row=0, column=0, sticky="w")
+        ttk.Entry(bottom_frame, textvariable=self.interval_var, width=8).grid(row=0, column=1, padx=(4, 8), sticky="w")
+        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(0, 8))
+        self.start_button = ttk.Button(bottom_frame, text="Start", command=self.start_clicking, width=8)
+        self.start_button.grid(row=0, column=3, padx=(0, 4))
+        self.stop_button = ttk.Button(bottom_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
+        self.stop_button.grid(row=0, column=4, padx=(0, 8))
+        ttk.Button(bottom_frame, text="Import", command=self.import_script).grid(row=0, column=5, padx=(0, 4))
+        ttk.Button(bottom_frame, text="Export", command=self.export_script).grid(row=0, column=6, sticky="w", padx=(0, 4))
+        ttk.Button(bottom_frame, text="Auto Config", command=self.open_auto_config_dialog).grid(row=0, column=7)
 
         ttk.Label(bottom_frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(12, 0)
+            row=1, column=0, columnspan=8, sticky="w", pady=(6, 0)
         )
+
+    def _build_settings_ui(self, frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        bg_frame = ttk.LabelFrame(frame, text="Window Mode", padding=10)
+        bg_frame.grid(row=0, column=0, sticky="ew")
+        ttk.Checkbutton(
+            bg_frame,
+            text="Pure background clicking",
+            variable=self.pure_background_window_click_var,
+            command=self._on_pure_background_setting_changed,
+        ).grid(row=0, column=0, sticky="w")
         ttk.Label(
-            bottom_frame,
-            text="Drag dots to set positions. Press Esc to stop clicking.",
-            foreground="#666666",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            bg_frame,
+            text="When enabled, window-mode dots are limited to the target client area and title-bar clicks are disabled.",
+            foreground="#555555",
+            wraplength=500,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
     def _build_screen_mode_ui(self, frame) -> None:
         # Row 1: Position List Label
@@ -672,13 +689,13 @@ class ClickerApp:
         list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
         
         columns = ("#", "type", "details")
-        self.screen_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=8)
+        self.screen_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=9)
         self.screen_tree.heading("#", text="#")
         self.screen_tree.heading("type", text="Action")
         self.screen_tree.heading("details", text="Details")
         self.screen_tree.column("#", width=40, anchor="center")
         self.screen_tree.column("type", width=100, anchor="center")
-        self.screen_tree.column("details", width=200, anchor="w")
+        self.screen_tree.column("details", width=360, anchor="w")
         
         self.screen_tree.grid(row=0, column=0, sticky="ew")
         self.screen_tree.bind("<<TreeviewSelect>>", self._on_screen_list_select)
@@ -724,7 +741,7 @@ class ClickerApp:
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.target_win_list = tk.Listbox(win_list_frame, height=10, width=30)
+        self.target_win_list = tk.Listbox(win_list_frame, height=12, width=28)
         self.target_win_list.pack(side="left", fill="both", expand=True)
         
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
@@ -746,13 +763,13 @@ class ClickerApp:
         pt_list_frame.pack(fill="both", expand=True, pady=4)
         
         columns = ("#", "type", "details")
-        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=10)
+        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=12)
         self.window_pt_tree.heading("#", text="#")
         self.window_pt_tree.heading("type", text="Action")
         self.window_pt_tree.heading("details", text="Details")
         self.window_pt_tree.column("#", width=40, anchor="center")
         self.window_pt_tree.column("type", width=80, anchor="center")
-        self.window_pt_tree.column("details", width=250, anchor="w")
+        self.window_pt_tree.column("details", width=330, anchor="w")
         
         self.window_pt_tree.pack(side="left", fill="both", expand=True)
         self.window_pt_tree.bind("<<TreeviewSelect>>", self._on_window_list_select)
@@ -788,15 +805,19 @@ class ClickerApp:
             
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0: # Screen
+            self._active_mode = "screen"
             for p in self._screen_positions:
                 if p["type"] == "click": p["dot"].deiconify()
             for p in self._window_positions:
                 if p["type"] == "click": p["dot"].withdraw()
-        else: # Window
+        elif current_tab == 1: # Window
+            self._active_mode = "window"
             for p in self._screen_positions:
                 if p["type"] == "click": p["dot"].withdraw()
             for p in self._window_positions:
                 if p["type"] == "click": p["dot"].deiconify()
+        else:
+            self._set_dots_visible(False)
             
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
@@ -815,12 +836,11 @@ class ClickerApp:
                     else:
                         rect = get_window_rect(hwnd)
                         if rect:
-                            # Clamp relative coordinates to current window size
-                            ww = rect[2] - rect[0]
-                            wh = rect[3] - rect[1]
-                            p["x"] = max(0, min(p["x"], ww))
-                            p["y"] = max(0, min(p["y"], wh))
-                            
+                            p["x"], p["y"] = clamp_window_position(
+                                hwnd, p["x"], p["y"], self.pure_background_window_click_var.get()
+                            )
+                            p["dot"].pure_background = self.pure_background_window_click_var.get()
+
                             sx = rect[0] + p["x"]
                             sy = rect[1] + p["y"]
                             p["dot"].deiconify()
@@ -836,14 +856,14 @@ class ClickerApp:
         """Open a dialog to select a window from all visible windows."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Select Window (Auto-refreshing)")
-        dialog.geometry("400x500")
+        dialog.geometry("460x420")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        ttk.Label(dialog, text="Select a window from the list:").pack(pady=8)
-        
+        ttk.Label(dialog, text="Select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
+
         list_frame = ttk.Frame(dialog)
-        list_frame.pack(fill="both", expand=True, padx=8)
+        list_frame.pack(fill="both", expand=True, padx=10)
         
         lb = tk.Listbox(list_frame)
         lb.pack(side="left", fill="both", expand=True)
@@ -907,8 +927,10 @@ class ClickerApp:
                     self.target_win_list.activate(new_idx)
                 dialog.destroy()
         
-        ttk.Button(dialog, text="Select", command=on_select).pack(pady=8)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack(pady=(0, 8))
+        button_row = ttk.Frame(dialog)
+        button_row.pack(fill="x", padx=10, pady=8)
+        ttk.Button(button_row, text="Select", command=on_select).pack(side="right")
+        ttk.Button(button_row, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
     def _refresh_window_list(self):
         self.target_win_list.delete(0, "end")
@@ -1030,7 +1052,7 @@ class ClickerApp:
     def _refresh_screen_list(self) -> None:
         for item in self.screen_tree.get_children():
             self.screen_tree.delete(item)
-            
+
         dot_count = 0
         for i, item in enumerate(self._screen_positions):
             if item["type"] == "click":
@@ -1042,6 +1064,13 @@ class ClickerApp:
             else:
                 details = f"Delay: {item['ms']}ms"
                 self.screen_tree.insert("", "end", values=("", "Wait", details))
+
+    def _refresh_screen_list_item(self, index: int) -> None:
+        self._refresh_screen_list()
+        items = self.screen_tree.get_children()
+        if 0 <= index < len(items):
+            self.screen_tree.selection_set(items[index])
+            self.screen_tree.see(items[index])
 
     def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
@@ -1070,14 +1099,19 @@ class ClickerApp:
             messagebox.showerror("Error", "Could not get window position.")
             return
             
-        # Place dot at center of window (including title bar)
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
         rel_x, rel_y = win_w // 2, win_h // 2
-        
+        if self.pure_background_window_click_var.get():
+            bounds = get_client_bounds_in_window(hwnd)
+            if bounds:
+                rel_x = (bounds[0] + bounds[2]) // 2
+                rel_y = (bounds[1] + bounds[3]) // 2
+
         index = len(self._window_positions)
-        dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move, 
-                          on_click=self._on_window_dot_click, hwnd=hwnd)
+        dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
+                          on_click=self._on_window_dot_click, hwnd=hwnd,
+                          pure_background=self.pure_background_window_click_var.get())
         
         self._window_positions.append({
             "type": "click",
@@ -1169,7 +1203,7 @@ class ClickerApp:
     def _refresh_window_pt_list(self) -> None:
         for item in self.window_pt_tree.get_children():
             self.window_pt_tree.delete(item)
-            
+
         dot_count = 0
         for i, item in enumerate(self._window_positions):
             if item["type"] == "click":
@@ -1183,6 +1217,13 @@ class ClickerApp:
                 details = f"Delay: {item['ms']}ms"
                 self.window_pt_tree.insert("", "end", values=("", "Wait", details))
 
+    def _refresh_window_pt_item(self, index: int) -> None:
+        self._refresh_window_pt_list()
+        items = self.window_pt_tree.get_children()
+        if 0 <= index < len(items):
+            self.window_pt_tree.selection_set(items[index])
+            self.window_pt_tree.see(items[index])
+
     def clear_window_positions(self) -> None:
         for p in self._window_positions:
             if p["type"] == "click":
@@ -1193,10 +1234,11 @@ class ClickerApp:
     def apply_step_delay(self):
         """Save the custom delay for the selected position in either mode."""
         current_tab = self.notebook.index(self.notebook.select())
-        if current_tab == 0: # Screen
+        editing_screen = current_tab == 0 or (current_tab == 2 and self._active_mode == "screen")
+        if editing_screen:
             sel = self.screen_tree.selection()
             positions = self._screen_positions
-        else: # Window
+        else:
             sel = self.window_pt_tree.selection()
             positions = self._window_positions
             
@@ -1205,7 +1247,7 @@ class ClickerApp:
             return
         
         val = self.step_delay_var.get().strip()
-        index = self.screen_tree.index(sel[0]) if current_tab == 0 else self.window_pt_tree.index(sel[0])
+        index = self.screen_tree.index(sel[0]) if editing_screen else self.window_pt_tree.index(sel[0])
         if not val:
             if positions[index]["type"] == "click":
                 pass # Can't clear pos via delay entry easily
@@ -1228,20 +1270,35 @@ class ClickerApp:
                 messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds or x,y for click.")
                 return
         
-        if current_tab == 0: self._refresh_screen_list()
+        if editing_screen: self._refresh_screen_list()
         else: self._refresh_window_pt_list()
         self.status_var.set(f"Updated item {index+1}.")
         # Select back the item to keep focus
-        new_items = (self.screen_tree if current_tab == 0 else self.window_pt_tree).get_children()
-        (self.screen_tree if current_tab == 0 else self.window_pt_tree).selection_set(new_items[index])
+        new_items = (self.screen_tree if editing_screen else self.window_pt_tree).get_children()
+        (self.screen_tree if editing_screen else self.window_pt_tree).selection_set(new_items[index])
+
+    def _on_pure_background_setting_changed(self) -> None:
+        enabled = self.pure_background_window_click_var.get()
+        for p in self._window_positions:
+            if p.get("type") != "click":
+                continue
+            hwnd = p.get("hwnd")
+            if hwnd and user32.IsWindow(hwnd):
+                p["x"], p["y"] = clamp_window_position(hwnd, p["x"], p["y"], enabled)
+            p["dot"].pure_background = enabled
+        self._refresh_window_pt_list()
+        self.status_var.set("Pure background window clicking is " + ("enabled." if enabled else "disabled."))
 
     def collect_script_data(self) -> dict:
         """Return the current GUI state in the script JSON format."""
-        current_tab = self.notebook.index(self.notebook.select())
+        mode = self._active_mode
         return normalize_script_data({
-            "mode": "screen" if current_tab == 0 else "window",
+            "mode": mode,
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
+            "settings": {
+                "pure_background_window_click": self.pure_background_window_click_var.get(),
+            },
             "screen_positions": [
                 {"type": p["type"], "x": p.get("x"), "y": p.get("y"), "delay": p.get("delay"), "ms": p.get("ms")}
                 for p in self._screen_positions
@@ -1261,7 +1318,7 @@ class ClickerApp:
             # Unified action list for execution
             "actions": [
                 {k: v for k, v in p.items() if k != "dot"} 
-                for p in (self._screen_positions if current_tab == 0 else self._window_positions)
+                for p in (self._screen_positions if mode == "screen" else self._window_positions)
             ]
         })
 
@@ -1275,6 +1332,9 @@ class ClickerApp:
 
         self.interval_var.set(data.get("global_interval", "500"))
         self.loop_var.set(data.get("loop", True))
+        self.pure_background_window_click_var.set(
+            data.get("settings", {}).get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+        )
 
         mode = data.get("mode", "window" if data.get("window_positions") else "screen")
         self.notebook.select(0 if mode == "screen" else 1)
@@ -1328,6 +1388,7 @@ class ClickerApp:
                     self._on_window_dot_move,
                     on_click=self._on_window_dot_click,
                     hwnd=found_hwnd,
+                    pure_background=self.pure_background_window_click_var.get(),
                 )
                 self._window_positions.append({
                     "type": "click",
@@ -1364,8 +1425,8 @@ class ClickerApp:
         # Center dialog relative to main window
         self.root.update_idletasks()
         dialog.update_idletasks()
-        width = 600
-        height = 320
+        width = 560
+        height = 260
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (width // 2)
         y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (height // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -1374,7 +1435,7 @@ class ClickerApp:
         dialog.grab_set()
 
         config_path = get_auto_config_path()
-        frame = ttk.Frame(dialog, padding=14)
+        frame = ttk.Frame(dialog, padding=10)
         frame.pack(fill="both", expand=True)
 
         path_text = config_path
@@ -1479,13 +1540,11 @@ class ClickerApp:
         if self._click_thread and self._click_thread.is_alive():
             return
             
-        current_tab = self.notebook.index(self.notebook.select())
-        if current_tab == 0:
+        mode = self._active_mode
+        if mode == "screen":
             positions = self._screen_positions
-            mode = "screen"
         else:
             positions = self._window_positions
-            mode = "window"
             
         if not positions:
             messagebox.showerror("No positions", "Add at least one dot first.")
@@ -1510,8 +1569,9 @@ class ClickerApp:
         # Hide dots while clicking to avoid blocking
         self._set_dots_visible(False)
         
+        pure_background = self.pure_background_window_click_var.get()
         self._click_thread = threading.Thread(
-            target=self._click_loop, args=(global_interval, actions_snapshot, mode), daemon=True
+            target=self._click_loop, args=(global_interval, actions_snapshot, mode, pure_background), daemon=True
         )
         self._click_thread.start()
         
@@ -1541,7 +1601,7 @@ class ClickerApp:
                 self._stop_event.set()
                 break
 
-    def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str) -> None:
+    def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str, pure_background: bool) -> None:
         while not self._stop_event.is_set():
             for action in actions:
                 if self._stop_event.is_set():
@@ -1550,7 +1610,7 @@ class ClickerApp:
                 action_type = action.get("type", "click")
                 if action_type == "click":
                     if mode == "window":
-                        if not click_window_position(action["hwnd"], action["x"], action["y"]):
+                        if not click_window_position(action["hwnd"], action["x"], action["y"], pure_background):
                             pass # Or continue
                     else:
                         self._click_at(action["x"], action["y"])

@@ -58,13 +58,16 @@ Automation behavior:
 
 ### 2. Window Mode
 - **Target Windows**: Select specific windows to click within.
-- **Enhanced Background Clicking**: Uses `PostMessage` and child-window detection to click windows even when they are not in the foreground.
-- **Full Window Range**: Draggable dots cover the entire window area, including the title bar.
-- **Smart Constraints**: Dots are locked within the window boundaries and follow the window as it moves or resizes.
+- **Background Client Clicking**: Uses `PostMessage` and child-window detection for client-area clicks even when the window is not foregrounded.
+- **Title Bar Support**: When pure background mode is off, non-client clicks such as title-bar buttons fall back to real mouse input for better compatibility.
+- **Pure Background Mode**: The Settings tab can enable pure background window clicking. In this mode, window dots are limited to the client area and title-bar clicks are not supported.
+- **Smart Constraints**: Dots are locked within the active window-mode range and follow the window as it moves or resizes.
 - **Cross-Window Sequencing**: Create sequences across multiple different windows.
 
 ### UI & UX Improvements
-- **Optimized Focus**: Focus stays on the window list when adding dots for rapid setup.
+- **Settings Tab**: Window-mode behavior is configured separately from click sequences.
+- **Compact Controls**: Run, import/export, loop, and interval controls share one bottom bar to leave more room for click lists.
+- **Optimized Dialogs**: Window selection and auto configuration dialogs use more compact layouts.
 - **Bidirectional Selection**: Clicking a dot on the screen automatically selects its corresponding entry in the list.
 ### General Features
 - **Loop Toggle**: Choose between continuous looping or a single execution of your click sequence.
@@ -77,16 +80,17 @@ Automation behavior:
 
 ## Usage
 
-1. **Choose Mode**: Use the tabs at the top to switch between **Screen Mode** and **Window Mode**.
-2. **Add Targets**:
+1. **Choose Mode**: Use the tabs at the top to switch between **Screen Mode**, **Window Mode**, and **Settings**.
+2. **Optional Window Setting**: In **Settings**, enable **Pure background clicking** if window-mode clicks must never use real mouse input. This limits window dots to the target window's client area.
+3. **Add Targets**:
    - In **Screen Mode**, click "Add Dot".
    - In **Window Mode**, click "Add Window" to pick a target (the list refreshes automatically). Once added, the window is automatically selected so you can immediately click "Add Dot".
-3. **Position Dots**: Drag the numbered dots to your desired locations.
-4. **Configure Sequence**: Adjust the order using Up/Down buttons and set custom post-click delays.
-5. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
-6. **Save/Load**: Use **Export Script** to save your configuration and **Import Script** to load a previously saved setup.
-7. **Auto-run Setup**: Use **Auto Config** to import a script or save the current setup for `--auto --silent`. For looped auto configs, set the timeout and max-round safety limits.
-8. **Run**: Click **Start**. Press **Esc** to stop.
+4. **Position Dots**: Drag the numbered dots to your desired locations.
+5. **Configure Sequence**: Adjust the order using Up/Down buttons and set custom post-click delays.
+6. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
+7. **Save/Load**: Use **Export** to save your configuration and **Import** to load a previously saved setup.
+8. **Auto-run Setup**: Use **Auto Config** to import a script or save the current setup for `--auto --silent`. For looped auto configs, set the timeout and max-round safety limits.
+9. **Run**: Click **Start**. Press **Esc** to stop.
 
 ## Build Executable
 
