@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 
 import pydirectinput
 import win32gui
@@ -108,6 +109,7 @@ DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
 DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
 DEFAULT_PURE_BACKGROUND_WINDOW_CLICK = False
+AUTO_LOG_DIRNAME = "logs"
 ERROR_ALREADY_EXISTS = 183
 
 class RECT(ctypes.Structure):
@@ -180,11 +182,32 @@ def clamp_window_position(hwnd: int, x: int, y: int, pure_background: bool = Fal
     return (max(bounds[0], min(int(x), bounds[2])), max(bounds[1], min(int(y), bounds[3])))
 
 
-def get_auto_config_path() -> str:
+def get_app_data_dir() -> str:
     base_dir = os.environ.get("LOCALAPPDATA")
     if not base_dir:
         base_dir = os.path.join(os.path.expanduser("~"), "AppData", "Local")
-    return os.path.join(base_dir, APP_NAME, AUTO_CONFIG_FILENAME)
+    return os.path.join(base_dir, APP_NAME)
+
+
+def get_auto_config_path() -> str:
+    return os.path.join(get_app_data_dir(), AUTO_CONFIG_FILENAME)
+
+
+def get_auto_log_path() -> str:
+    log_dir = os.path.join(get_app_data_dir(), AUTO_LOG_DIRNAME)
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "auto.log")
+
+
+def write_auto_log(log_path: str | None, message: str) -> None:
+    if not log_path:
+        return
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
 
 
 def read_script_file(file_path: str) -> dict:
@@ -264,7 +287,7 @@ def find_windows_by_titles(titles: list[str]) -> dict[str, int]:
     return found
 
 
-def wait_for_windows(titles: list[str], timeout_seconds: int) -> dict[str, int]:
+def wait_for_windows(titles: list[str], timeout_seconds: int, log_path: str | None = None) -> dict[str, int]:
     if not titles:
         return {}
 
@@ -272,7 +295,13 @@ def wait_for_windows(titles: list[str], timeout_seconds: int) -> dict[str, int]:
     while True:
         found = find_windows_by_titles(titles)
         if all(title in found for title in titles):
+            if log_path:
+                write_auto_log(log_path, f"matched windows: {sorted(found.keys())}")
             return found
+        if log_path:
+            missing = [title for title in titles if title not in found]
+            found_titles = [title for title in titles if title in found]
+            write_auto_log(log_path, f"waiting for windows; found={found_titles}; missing={missing}")
         if timeout_seconds <= 0 or time.monotonic() >= deadline:
             return found
         time.sleep(1)
@@ -361,13 +390,16 @@ def sleep_until_deadline(seconds: float, deadline: float | None) -> None:
         time.sleep(min(seconds, remaining))
 
 
-def run_auto_config(config_path: str) -> int:
+def run_auto_config(config_path: str, log_path: str | None = None) -> int:
+    write_auto_log(log_path, f"auto run started; config={config_path}")
     if not os.path.exists(config_path):
+        write_auto_log(log_path, "auto config not found; exit=2")
         return 2
 
     try:
         data = read_script_file(config_path)
-    except Exception:
+    except Exception as e:
+        write_auto_log(log_path, f"failed to read auto config: {e}; exit=2")
         return 2
 
     mode = data.get("mode", "window" if data.get("window_positions") else "screen")
@@ -393,12 +425,29 @@ def run_auto_config(config_path: str) -> int:
         timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
         max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
 
+    write_auto_log(
+        log_path,
+        f"loaded auto config; mode={mode}; loop={loop_enabled}; pure_background={pure_background}; "
+        f"timeouts={{loop:{timeout_seconds}, rounds:{max_rounds}, wait:{target_wait_seconds}}}",
+    )
+    write_auto_log(log_path, f"target windows={data.get('target_windows', [])}")
+    write_auto_log(log_path, f"action count={len(data.get('actions', []))}")
+
     positions: list[dict] = []
     if mode == "window":
         titles = set(data.get("target_windows", []))
         titles.update(p.get("win_title") for p in data.get("window_positions", []) if p.get("win_title"))
         titles = sorted(titles)
-        window_map = wait_for_windows(titles, target_wait_seconds)
+        write_auto_log(log_path, f"waiting for windows={titles}")
+        window_map = wait_for_windows(titles, target_wait_seconds, log_path)
+        write_auto_log(log_path, f"window map keys={sorted(window_map.keys())}")
+
+        if mode == "window" and not window_map:
+            write_auto_log(log_path, "no target windows matched before timeout")
+
+        if mode == "window" and window_map:
+            write_auto_log(log_path, f"matched window titles={list(window_map.keys())}")
+
 
         for p in data.get("window_positions", []):
             hwnd = window_map.get(p.get("win_title"))
@@ -418,7 +467,10 @@ def run_auto_config(config_path: str) -> int:
             })
 
     if not positions:
+        write_auto_log(log_path, "no runnable positions resolved; exit=3")
         return 3
+
+    write_auto_log(log_path, f"resolved runnable positions={len(positions)}")
 
     deadline = None
     if loop_enabled and timeout_seconds > 0:
@@ -426,8 +478,13 @@ def run_auto_config(config_path: str) -> int:
 
     rounds = 0
     while True:
+        write_auto_log(log_path, f"starting round {rounds + 1}")
+        round_clicks = 0
+        round_waits = 0
+
         for action in data.get("actions", []):
             if deadline is not None and time.monotonic() >= deadline:
+                write_auto_log(log_path, "loop timeout reached before action; exit=0")
                 return 0
 
             action_type = action.get("type", "click")
@@ -435,10 +492,18 @@ def run_auto_config(config_path: str) -> int:
                 if mode == "window":
                     hwnd = window_map.get(action.get("win_title"))
                     if hwnd:
-                        click_window_position(hwnd, action["x"], action["y"], pure_background)
+                        if click_window_position(hwnd, action["x"], action["y"], pure_background):
+                            round_clicks += 1
+                            write_auto_log(log_path, f"clicked window action title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                        else:
+                            write_auto_log(log_path, f"skipped window action title={action.get('win_title')} x={action.get('x')} y={action.get('y')}; pure_background={pure_background}")
+                    else:
+                        write_auto_log(log_path, f"missing window for action title={action.get('win_title')}")
                 else:
                     pydirectinput.click(x=int(action["x"]), y=int(action["y"]), duration=0.05)
-                
+                    round_clicks += 1
+                    write_auto_log(log_path, f"clicked screen action x={action.get('x')} y={action.get('y')}")
+
                 # Implicit wait if global_interval is set and no specific delay in action
                 # However, the new system prefers explicit wait items.
                 # To maintain compatibility with older scripts that might be normalized:
@@ -447,18 +512,24 @@ def run_auto_config(config_path: str) -> int:
                     delay_ms = global_interval_ms
                 if delay_ms > 0:
                     sleep_until_deadline(delay_ms / 1000.0, deadline)
-            
+
             elif action_type == "wait":
                 wait_ms = action.get("ms", 0)
                 if wait_ms > 0:
+                    round_waits += 1
+                    write_auto_log(log_path, f"wait action ms={wait_ms}")
                     sleep_until_deadline(wait_ms / 1000.0, deadline)
 
         rounds += 1
+        write_auto_log(log_path, f"finished round {rounds}; clicks={round_clicks}; waits={round_waits}")
         if not loop_enabled:
+            write_auto_log(log_path, "loop disabled; exit=0")
             return 0
         if max_rounds > 0 and rounds >= max_rounds:
+            write_auto_log(log_path, f"max rounds reached ({max_rounds}); exit=0")
             return 0
         if deadline is not None and time.monotonic() >= deadline:
+            write_auto_log(log_path, "loop timeout reached after round; exit=0")
             return 0
 
 
@@ -496,7 +567,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.auto:
             config_path = args.config or get_auto_config_path()
-            return run_auto_config(config_path)
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"process started; argv={argv if argv is not None else sys.argv[1:]}")
+            result = run_auto_config(config_path, log_path)
+            write_auto_log(log_path, f"process finished; exit={result}")
+            return result
 
         ClickerApp().run()
         return 0
