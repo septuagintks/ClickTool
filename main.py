@@ -615,30 +615,36 @@ class ClickerApp:
             row=1, column=0, columnspan=2, sticky="w", pady=(0, 4)
         )
 
-        # Row 2: Listbox
+        # Row 2: Treeview for Actions
         list_frame = ttk.Frame(frame)
         list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
-        self.screen_list = tk.Listbox(
-            list_frame, height=8, width=50, activestyle="dotbox"
-        )
-        self.screen_list.grid(row=0, column=0)
-        self.screen_list.bind("<<ListboxSelect>>", self._on_screen_list_select)
         
-        scrollbar = ttk.Scrollbar(
-            list_frame, orient="vertical", command=self.screen_list.yview
-        )
+        columns = ("#", "type", "details")
+        self.screen_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=8)
+        self.screen_tree.heading("#", text="#")
+        self.screen_tree.heading("type", text="Action")
+        self.screen_tree.heading("details", text="Details")
+        self.screen_tree.column("#", width=40, anchor="center")
+        self.screen_tree.column("type", width=100, anchor="center")
+        self.screen_tree.column("details", width=200, anchor="w")
+        
+        self.screen_tree.grid(row=0, column=0, sticky="ew")
+        self.screen_tree.bind("<<TreeviewSelect>>", self._on_screen_list_select)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.screen_tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
-        self.screen_list.config(yscrollcommand=scrollbar.set)
+        self.screen_tree.configure(yscrollcommand=scrollbar.set)
 
         # Row 3: Selected Item Properties
-        prop_frame = ttk.LabelFrame(frame, text="Selected Position Properties", padding=8)
+        prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
         prop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         
-        ttk.Label(prop_frame, text="Wait after (ms):").grid(row=0, column=0, sticky="w")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=10)
+        self.screen_prop_label = ttk.Label(prop_frame, text="Value:")
+        self.screen_prop_label.grid(row=0, column=0, sticky="w")
+        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=15)
         self.screen_step_delay_entry.grid(row=0, column=1, padx=4)
         ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
-        ttk.Label(prop_frame, text="(Empty = use global interval)", font=("", 8), foreground="#666666").grid(row=1, column=0, columnspan=3, sticky="w")
+        ttk.Label(prop_frame, text="(For Wait items: ms; For Click items: N/A)", font=("", 8), foreground="#666666").grid(row=1, column=0, columnspan=3, sticky="w")
 
         # Row 4: Controls
         edit_row = ttk.Frame(frame)
@@ -687,13 +693,21 @@ class ClickerApp:
         pt_list_frame = ttk.Frame(pt_frame)
         pt_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.window_pt_list = tk.Listbox(pt_list_frame, height=10, width=40)
-        self.window_pt_list.pack(side="left", fill="both", expand=True)
-        self.window_pt_list.bind("<<ListboxSelect>>", self._on_window_list_select)
+        columns = ("#", "type", "details")
+        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=10)
+        self.window_pt_tree.heading("#", text="#")
+        self.window_pt_tree.heading("type", text="Action")
+        self.window_pt_tree.heading("details", text="Details")
+        self.window_pt_tree.column("#", width=40, anchor="center")
+        self.window_pt_tree.column("type", width=80, anchor="center")
+        self.window_pt_tree.column("details", width=250, anchor="w")
         
-        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_list.yview)
+        self.window_pt_tree.pack(side="left", fill="both", expand=True)
+        self.window_pt_tree.bind("<<TreeviewSelect>>", self._on_window_list_select)
+        
+        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_tree.yview)
         pt_scroll.pack(side="right", fill="y")
-        self.window_pt_list.config(yscrollcommand=pt_scroll.set)
+        self.window_pt_tree.configure(yscrollcommand=pt_scroll.set)
         
         pt_btn_row = ttk.Frame(pt_frame)
         pt_btn_row.pack(fill="x")
@@ -705,11 +719,12 @@ class ClickerApp:
         ttk.Button(pt_btn_row, text="Clear", command=self.clear_window_positions).pack(side="left", padx=2)
 
         # Selected Item Properties for Window Mode
-        win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Position Properties", padding=8)
+        win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
         win_prop_frame.pack(fill="x", pady=(8, 0))
         
-        ttk.Label(win_prop_frame, text="Wait after (ms):").grid(row=0, column=0, sticky="w")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=10)
+        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:")
+        self.window_prop_label.grid(row=0, column=0, sticky="w")
+        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=15)
         self.window_step_delay_entry.grid(row=0, column=1, padx=4)
         ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
 
@@ -721,11 +736,15 @@ class ClickerApp:
             
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0: # Screen
-            for p in self._screen_positions: p["dot"].deiconify()
-            for p in self._window_positions: p["dot"].withdraw()
+            for p in self._screen_positions:
+                if p["type"] == "click": p["dot"].deiconify()
+            for p in self._window_positions:
+                if p["type"] == "click": p["dot"].withdraw()
         else: # Window
-            for p in self._screen_positions: p["dot"].withdraw()
-            for p in self._window_positions: p["dot"].deiconify()
+            for p in self._screen_positions:
+                if p["type"] == "click": p["dot"].withdraw()
+            for p in self._window_positions:
+                if p["type"] == "click": p["dot"].deiconify()
             
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
@@ -878,33 +897,34 @@ class ClickerApp:
             "dot": dot
         })
         self._refresh_screen_list()
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(index)
-        self.screen_list.activate(index)
+        # Select the newly added dot
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self.status_var.set(f"Added screen dot at center.")
 
     def add_screen_wait(self) -> None:
         """Add a wait item to the screen list."""
-        index = len(self._screen_positions)
         self._screen_positions.append({
             "type": "wait",
             "ms": 500
         })
         self._refresh_screen_list()
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(index)
-        self.screen_list.activate(index)
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self.status_var.set("Added 500ms wait.")
 
     def _on_screen_dot_click(self, index):
-        """Select corresponding item in list when dot is clicked."""
-        self.notebook.select(0) # Ensure screen tab is active
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(index)
-        self.screen_list.activate(index)
-        self._on_screen_list_select()
+        """Select corresponding item in tree when dot is clicked."""
+        self.notebook.select(0)
+        items = self.screen_tree.get_children()
+        if index < len(items):
+            self.screen_tree.selection_set(items[index])
+            self.screen_tree.see(items[index])
+            self._on_screen_list_select()
 
     def _on_screen_dot_move(self, index, x, y):
         """Callback when a screen dot is dragged."""
@@ -913,32 +933,34 @@ class ClickerApp:
         self._refresh_screen_list_item(index)
 
     def _on_screen_list_select(self, event=None):
-        """Update the property fields when a position is selected in the screen list."""
-        sel = self.screen_list.curselection()
+        """Update the property fields when a position is selected in the screen tree."""
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        pos = self._screen_positions[sel[0]]
+        index = self.screen_tree.index(sel[0])
+        pos = self._screen_positions[index]
         if pos["type"] == "click":
-            delay = pos["delay"]
-            self.step_delay_var.set(str(delay) if delay is not None else "")
+            self.screen_prop_label.config(text="Pos (x,y):")
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
         else:
+            self.screen_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
 
     def remove_screen_position(self) -> None:
-        sel = self.screen_list.curselection()
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.screen_tree.index(sel[0])
         if self._screen_positions[index]["type"] == "click":
             self._screen_positions[index]["dot"].destroy()
         del self._screen_positions[index]
         self._refresh_screen_list()
 
     def move_screen_position(self, delta: int) -> None:
-        sel = self.screen_list.curselection()
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.screen_tree.index(sel[0])
         target = index + delta
         if not 0 <= target < len(self._screen_positions):
             return
@@ -948,9 +970,26 @@ class ClickerApp:
             self._screen_positions[index],
         )
         self._refresh_screen_list()
-        self.screen_list.selection_set(target)
-        self.screen_list.activate(target)
+        new_items = self.screen_tree.get_children()
+        self.screen_tree.selection_set(new_items[target])
+        self.screen_tree.see(new_items[target])
         self._on_screen_list_select()
+
+    def _refresh_screen_list(self) -> None:
+        for item in self.screen_tree.get_children():
+            self.screen_tree.delete(item)
+            
+        dot_count = 0
+        for i, item in enumerate(self._screen_positions):
+            if item["type"] == "click":
+                dot_count += 1
+                item["dot"].index = i
+                item["dot"].set_number(dot_count)
+                details = f"Pos: ({int(item['x'])}, {int(item['y'])})"
+                self.screen_tree.insert("", "end", values=(dot_count, "Click", details))
+            else:
+                details = f"Delay: {item['ms']}ms"
+                self.screen_tree.insert("", "end", values=("", "Wait", details))
 
     def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
@@ -958,31 +997,6 @@ class ClickerApp:
                 p["dot"].destroy()
         self._screen_positions.clear()
         self._refresh_screen_list()
-
-    def _refresh_screen_list(self) -> None:
-        self.screen_list.delete(0, "end")
-        dot_count = 0
-        for i, item in enumerate(self._screen_positions):
-            if item["type"] == "click":
-                dot_count += 1
-                item["dot"].index = i
-                item["dot"].set_number(dot_count)
-                delay_str = f" [Wait: {item['delay']}ms]" if item['delay'] is not None else ""
-                text = f"{i+1}: Click ({int(item['x'])}, {int(item['y'])}){delay_str}"
-            else:
-                text = f"{i+1}: Wait {item['ms']}ms"
-            self.screen_list.insert("end", text)
-
-    def _refresh_screen_list_item(self, index, append=False):
-        pos = self._screen_positions[index]
-        delay_str = f" [Wait: {pos['delay']}ms]" if pos['delay'] is not None else ""
-        text = f"{index+1}: ({int(pos['x'])}, {int(pos['y'])}){delay_str}"
-        
-        if append:
-            self.screen_list.insert("end", text)
-        else:
-            self.screen_list.delete(index)
-            self.screen_list.insert(index, text)
 
     def add_window_dot(self) -> None:
         """Create a new draggable dot for the selected window."""
@@ -1023,35 +1037,33 @@ class ClickerApp:
             "win_title": win_data["title"]
         })
         self._refresh_window_pt_list()
-        
-        # Keep focus on window list as requested
-        self.target_win_list.selection_set(win_idx)
-        self.target_win_list.activate(win_idx)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
         
         self.status_var.set(f"Added window dot for '{win_data['title']}'.")
 
     def add_window_wait(self) -> None:
         """Add a wait item to the window list."""
-        index = len(self._window_positions)
         self._window_positions.append({
             "type": "wait",
             "ms": 500
         })
         self._refresh_window_pt_list()
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(index)
-        self.window_pt_list.activate(index)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
         self._on_window_list_select()
         self.status_var.set("Added 500ms wait.")
 
     def _on_window_dot_click(self, index):
-        """Select corresponding item in list when dot is clicked."""
-        self.notebook.select(1) # Ensure window tab is active
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(index)
-        self.window_pt_list.activate(index)
-        self.window_pt_list.see(index)
-        self._on_window_list_select()
+        """Select corresponding item in tree when dot is clicked."""
+        self.notebook.select(1)
+        items = self.window_pt_tree.get_children()
+        if index < len(items):
+            self.window_pt_tree.selection_set(items[index])
+            self.window_pt_tree.see(items[index])
+            self._on_window_list_select()
 
     def _on_window_dot_move(self, index, x, y):
         """Callback when a window dot is dragged (x, y are relative)."""
@@ -1060,32 +1072,34 @@ class ClickerApp:
         self._refresh_window_pt_item(index)
 
     def _on_window_list_select(self, event=None):
-        """Update the property fields when a position is selected in the window point list."""
-        sel = self.window_pt_list.curselection()
+        """Update the property fields when a position is selected in the window point tree."""
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        pos = self._window_positions[sel[0]]
+        index = self.window_pt_tree.index(sel[0])
+        pos = self._window_positions[index]
         if pos["type"] == "click":
-            delay = pos["delay"]
-            self.step_delay_var.set(str(delay) if delay is not None else "")
+            self.window_prop_label.config(text="Pos (x,y):")
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
         else:
+            self.window_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
 
     def remove_window_position(self) -> None:
-        sel = self.window_pt_list.curselection()
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.window_pt_tree.index(sel[0])
         if self._window_positions[index]["type"] == "click":
             self._window_positions[index]["dot"].destroy()
         del self._window_positions[index]
         self._refresh_window_pt_list()
 
     def move_window_position(self, delta: int) -> None:
-        sel = self.window_pt_list.curselection()
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.window_pt_tree.index(sel[0])
         target = index + delta
         if not 0 <= target < len(self._window_positions):
             return
@@ -1095,9 +1109,27 @@ class ClickerApp:
             self._window_positions[index],
         )
         self._refresh_window_pt_list()
-        self.window_pt_list.selection_set(target)
-        self.window_pt_list.activate(target)
+        new_items = self.window_pt_tree.get_children()
+        self.window_pt_tree.selection_set(new_items[target])
+        self.window_pt_tree.see(new_items[target])
         self._on_window_list_select()
+
+    def _refresh_window_pt_list(self) -> None:
+        for item in self.window_pt_tree.get_children():
+            self.window_pt_tree.delete(item)
+            
+        dot_count = 0
+        for i, item in enumerate(self._window_positions):
+            if item["type"] == "click":
+                dot_count += 1
+                item["dot"].index = i
+                item["dot"].set_number(dot_count)
+                title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
+                details = f"[{title}] Pos: ({int(item['x'])}, {int(item['y'])})"
+                self.window_pt_tree.insert("", "end", values=(dot_count, "Click", details))
+            else:
+                details = f"Delay: {item['ms']}ms"
+                self.window_pt_tree.insert("", "end", values=("", "Wait", details))
 
     def clear_window_positions(self) -> None:
         for p in self._window_positions:
@@ -1106,72 +1138,50 @@ class ClickerApp:
         self._window_positions.clear()
         self._refresh_window_pt_list()
 
-    def _refresh_window_pt_list(self) -> None:
-        self.window_pt_list.delete(0, "end")
-        dot_count = 0
-        for i, item in enumerate(self._window_positions):
-            if item["type"] == "click":
-                dot_count += 1
-                item["dot"].index = i
-                item["dot"].set_number(dot_count)
-                delay_str = f" [Wait: {item['delay']}ms]" if item['delay'] is not None else ""
-                title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
-                text = f"{i+1}: [{title}] ({int(item['x'])}, {int(item['y'])}){delay_str}"
-            else:
-                text = f"{i+1}: Wait {item['ms']}ms"
-            self.window_pt_list.insert("end", text)
-
-    def _refresh_window_pt_item(self, index, append=False):
-        pos = self._window_positions[index]
-        delay_str = f" [Wait: {pos['delay']}ms]" if pos['delay'] is not None else ""
-        # Shorten title if too long
-        title = (pos['win_title'][:15] + '..') if len(pos['win_title']) > 15 else pos['win_title']
-        text = f"{index+1}: [{title}] ({int(pos['x'])}, {int(pos['y'])}){delay_str}"
-        
-        if append:
-            self.window_pt_list.insert("end", text)
-        else:
-            self.window_pt_list.delete(index)
-            self.window_pt_list.insert(index, text)
-
     def apply_step_delay(self):
         """Save the custom delay for the selected position in either mode."""
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0: # Screen
-            sel = self.screen_list.curselection()
+            sel = self.screen_tree.selection()
             positions = self._screen_positions
-            refresh_fn = self._refresh_screen_list_item
         else: # Window
-            sel = self.window_pt_list.curselection()
+            sel = self.window_pt_tree.selection()
             positions = self._window_positions
-            refresh_fn = self._refresh_window_pt_item
             
         if not sel:
             messagebox.showinfo("Selection Required", "Select a position first.")
             return
         
         val = self.step_delay_var.get().strip()
-        index = sel[0]
+        index = self.screen_tree.index(sel[0]) if current_tab == 0 else self.window_pt_tree.index(sel[0])
         if not val:
             if positions[index]["type"] == "click":
-                positions[index]["delay"] = None
+                pass # Can't clear pos via delay entry easily
             else:
                 positions[index]["ms"] = 0
         else:
             try:
-                ms = int(val)
-                if ms < 0: raise ValueError
                 if positions[index]["type"] == "click":
-                    positions[index]["delay"] = ms
+                    # Try to parse x,y if they edited the coordinate? 
+                    # For now just keep it simple.
+                    parts = val.split(',')
+                    if len(parts) == 2:
+                        positions[index]["x"] = int(parts[0])
+                        positions[index]["y"] = int(parts[1])
                 else:
+                    ms = int(val)
+                    if ms < 0: raise ValueError
                     positions[index]["ms"] = ms
             except ValueError:
-                messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds.")
+                messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds or x,y for click.")
                 return
         
         if current_tab == 0: self._refresh_screen_list()
         else: self._refresh_window_pt_list()
-        self.status_var.set(f"Updated wait time for item {index+1}.")
+        self.status_var.set(f"Updated item {index+1}.")
+        # Select back the item to keep focus
+        new_items = (self.screen_tree if current_tab == 0 else self.window_pt_tree).get_children()
+        (self.screen_tree if current_tab == 0 else self.window_pt_tree).selection_set(new_items[index])
 
     def collect_script_data(self) -> dict:
         """Return the current GUI state in the script JSON format."""
@@ -1302,8 +1312,8 @@ class ClickerApp:
         # Center dialog relative to main window
         self.root.update_idletasks()
         dialog.update_idletasks()
-        width = 480
-        height = 420
+        width = 600
+        height = 320
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (width // 2)
         y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (height // 2)
         dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -1465,11 +1475,13 @@ class ClickerApp:
     def _set_dots_visible(self, visible: bool):
         # Apply to both modes just in case
         for p in self._screen_positions:
-            if visible: p["dot"].deiconify()
-            else: p["dot"].withdraw()
+            if p["type"] == "click":
+                if visible: p["dot"].deiconify()
+                else: p["dot"].withdraw()
         for p in self._window_positions:
-            if visible: p["dot"].deiconify()
-            else: p["dot"].withdraw()
+            if p["type"] == "click":
+                if visible: p["dot"].deiconify()
+                else: p["dot"].withdraw()
 
     def _watch_escape(self) -> None:
         while not self._stop_event.wait(0.03):
