@@ -1,3 +1,11 @@
+# Temporary / scratch files
+temp_*
+tmp_*
+*_temp.py
+*_tmp.py
+hotkey_code.py
+main_ct.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
