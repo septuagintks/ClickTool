@@ -286,6 +286,14 @@ def get_auto_log_path() -> str:
 def write_auto_log(log_path: str | None, message: str) -> None:
     if not log_path:
         return
+    try:
+        if os.path.exists(log_path) and os.path.getsize(log_path) > 1024 * 1024:
+            old_path = log_path + ".old"
+            if os.path.exists(old_path):
+                os.remove(old_path)
+            os.rename(log_path, old_path)
+    except Exception:
+        pass
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_path, "a", encoding="utf-8") as f:
@@ -415,7 +423,7 @@ class DraggableDot(tk.Toplevel):
         
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.7)
+        self.attributes("-alpha", 0.75)
         
         # Initialize position
         if self.hwnd:
@@ -438,17 +446,30 @@ class DraggableDot(tk.Toplevel):
         self.attributes("-transparentcolor", "white")
         
         # 1. Outer halo border (Light Blue)
-        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#87CEFA", outline="")
+        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#c7e0f4", outline="")
         
         # 2. Main Dot (Primary Blue)
         inner_m = 6
         self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill="#0078d7", outline="white", width=1)
         
-        # 3. Sequence Number
-        self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Arial", 10, "bold"))
+        # 3. Sequence Number (Modern Segoe UI font)
+        self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Segoe UI", 9, "bold"))
+        
+        # 4. Glossy 3D Highlight Reflection
+        self.highlight = self.canvas.create_oval(11, 11, 17, 15, fill="white", outline="")
         
         self.canvas.bind("<Button-1>", self._on_start)
         self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, event):
+        self.canvas.itemconfig(self.halo, fill="#a9d1f5") # richer blue halo
+        self.canvas.itemconfig(self.circle, fill="#106ebe") # richer active blue
+
+    def _on_leave(self, event):
+        self.canvas.itemconfig(self.halo, fill="#c7e0f4")
+        self.canvas.itemconfig(self.circle, fill="#0078d7")
         
     def update_position(self, x, y):
         """Update window geometry based on center coordinate."""
@@ -517,7 +538,59 @@ class ClickerApp:
         self.sync_dots_loop()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def _apply_ui_theme(self) -> None:
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+            
+        bg_main = "#f3f2f1"
+        bg_card = "#ffffff"
+        fg_text = "#323130"
+        primary = "#0078d7"
+        primary_hover = "#106ebe"
+        primary_light = "#deecf9"
+        border_color = "#d2d0ce"
+        
+        style.configure(".", background=bg_main, foreground=fg_text, font=("Segoe UI", 9))
+        style.configure("TFrame", background=bg_main)
+        style.configure("TLabelframe", background=bg_main, bordercolor=border_color, borderwidth=1)
+        style.configure("TLabelframe.Label", background=bg_main, foreground="#605e5c", font=("Segoe UI", 9, "bold"))
+        
+        style.configure("TButton", padding=(8, 4), background=bg_card, bordercolor=border_color, focuscolor="", relief="flat")
+        style.map("TButton",
+            background=[("active", primary_light), ("disabled", "#f3f2f1")],
+            foreground=[("active", primary), ("disabled", "#a19f9d")],
+            bordercolor=[("active", primary)]
+        )
+        
+        style.configure("Accent.TButton", padding=(8, 4), background=primary, foreground="#ffffff", bordercolor=primary, focuscolor="", relief="flat")
+        style.map("Accent.TButton",
+            background=[("active", primary_hover), ("disabled", "#f3f2f1")],
+            foreground=[("active", "#ffffff"), ("disabled", "#a19f9d")],
+            bordercolor=[("active", primary_hover)]
+        )
+        
+        style.configure("TEntry", padding=4, insertcolor=fg_text, bordercolor=border_color, fieldbackground=bg_card)
+        style.map("TEntry",
+            bordercolor=[("focus", primary), ("hover", "#8a8886")]
+        )
+        
+        style.configure("TCheckbutton", background=bg_main, focuscolor="")
+        style.configure("TCombobox", padding=4, arrowsize=12, bordercolor=border_color, fieldbackground=bg_card)
+        style.map("TCombobox",
+            bordercolor=[("focus", primary), ("hover", "#8a8886")]
+        )
+        
+        style.configure("TNotebook", background=bg_main, bordercolor=border_color, borderwidth=1)
+        style.configure("TNotebook.Tab", background="#e1dfdd", padding=(12, 6), bordercolor=border_color, lightcolor="#e1dfdd")
+        style.map("TNotebook.Tab",
+            background=[("selected", bg_card), ("active", "#deecf9")],
+            lightcolor=[("selected", bg_card)],
+            bordercolor=[("selected", border_color)]
+        )
+
     def _build_ui(self) -> None:
+        self._apply_ui_theme()
         # Notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True)
@@ -546,7 +619,7 @@ class ClickerApp:
         ttk.Label(bottom_frame, text="Interval").grid(row=0, column=0, sticky="w")
         ttk.Entry(bottom_frame, textvariable=self.interval_var, width=8).grid(row=0, column=1, padx=(4, 8), sticky="w")
         ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(0, 8))
-        self.start_button = ttk.Button(bottom_frame, text="Start", command=self.start_clicking, width=8)
+        self.start_button = ttk.Button(bottom_frame, text="Start", command=self.start_clicking, width=8, style="Accent.TButton")
         self.start_button.grid(row=0, column=3, padx=(0, 4))
         self.stop_button = ttk.Button(bottom_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
         self.stop_button.grid(row=0, column=4, padx=(0, 8))
@@ -697,6 +770,23 @@ class ClickerApp:
         current_tab = self.notebook.index(self.notebook.select())
         
         if current_tab == 1 and not is_clicking:
+            active_windows = None
+            for w in self._target_windows:
+                hwnd = w["hwnd"]
+                if not hwnd or not user32.IsWindow(hwnd):
+                    if active_windows is None:
+                        active_windows = list_visible_windows()
+                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
+                    if not found_hwnd:
+                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    if found_hwnd:
+                        w["hwnd"] = found_hwnd
+                        for p in self._window_positions:
+                            if p.get("win_title") == w["title"]:
+                                p["hwnd"] = found_hwnd
+                                if "dot" in p:
+                                    p["dot"].hwnd = found_hwnd
+
             for p in self._window_positions:
                 hwnd = p.get("hwnd")
                 if hwnd and user32.IsWindow(hwnd):
@@ -1108,6 +1198,23 @@ class ClickerApp:
             mode = self._active_mode
             positions = self._screen_positions if mode == "screen" else self._window_positions
             
+        if mode == "window":
+            # Re-resolve target windows with invalid HWNDs by title match before starting
+            active_windows = list_visible_windows()
+            for w in self._target_windows:
+                hwnd = w["hwnd"]
+                if not hwnd or not user32.IsWindow(hwnd):
+                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
+                    if not found_hwnd:
+                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    if found_hwnd:
+                        w["hwnd"] = found_hwnd
+                        for p in self._window_positions:
+                            if p.get("win_title") == w["title"]:
+                                p["hwnd"] = found_hwnd
+                                if "dot" in p:
+                                    p["dot"].hwnd = found_hwnd
+
         if not positions:
             messagebox.showerror("No positions", "Add at least one dot first.")
             return
@@ -1175,12 +1282,27 @@ class ClickerApp:
                 
                 if mode == "window":
                     hwnd = pos["hwnd"]
-                    if user32.IsWindow(hwnd):
+                    if not hwnd or not user32.IsWindow(hwnd):
+                        active_windows = list_visible_windows()
+                        title = pos.get("win_title")
+                        found_hwnd = next((h for h, t in active_windows if t == title), None)
+                        if not found_hwnd:
+                            found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                        if found_hwnd:
+                            hwnd = found_hwnd
+                            pos["hwnd"] = hwnd
+                            for w in self._target_windows:
+                                if w["title"] == title:
+                                    w["hwnd"] = hwnd
+                            for p in self._window_positions:
+                                if p.get("win_title") == title:
+                                    p["hwnd"] = hwnd
+                                    if "dot" in p:
+                                        p["dot"].hwnd = hwnd
+                    if hwnd and user32.IsWindow(hwnd):
                         rect = get_window_rect(hwnd)
                         if rect:
                             click_window_position(hwnd, pos["x"], pos["y"])
-                        else:
-                            continue
                     else:
                         continue
                 else:
@@ -1413,11 +1535,25 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                 write_auto_log(log_path, "loop timeout reached; exit=0")
                 return 0
             if mode == "window":
-                if click_window_position(action["hwnd"], action["x"], action["y"]):
-                    clicks += 1
-                    write_auto_log(log_path, f"clicked window title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                hwnd = action.get("hwnd")
+                if not hwnd or not user32.IsWindow(hwnd):
+                    active_windows = list_visible_windows()
+                    title = action.get("win_title")
+                    found_hwnd = next((h for h, t in active_windows if t == title), None)
+                    if not found_hwnd:
+                        found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                    if found_hwnd:
+                        hwnd = found_hwnd
+                        action["hwnd"] = hwnd
+                        write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
+                if hwnd and user32.IsWindow(hwnd):
+                    if click_window_position(hwnd, action["x"], action["y"]):
+                        clicks += 1
+                        write_auto_log(log_path, f"clicked window title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                    else:
+                        write_auto_log(log_path, f"skipped window click outside client area title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
                 else:
-                    write_auto_log(log_path, f"skipped window click outside client area title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                    write_auto_log(log_path, f"missing window for action title={action.get('win_title')}")
             else:
                 send_mouse_click(int(action["x"]), int(action["y"]))
                 clicks += 1
