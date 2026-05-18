@@ -196,6 +196,17 @@ VK_MAP = {
     "RIGHT": 0x27,
     "DOWN": 0x28,
     "INSERT": 0x2D,
+    ",": 0xBC,
+    ".": 0xBE,
+    "/": 0xBF,
+    ";": 0xBA,
+    "'": 0xDE,
+    "[": 0xDB,
+    "]": 0xDD,
+    "\\": 0xDC,
+    "-": 0xBD,
+    "=": 0xBB,
+    "`": 0xC0,
 }
 for i in range(1, 13):
     VK_MAP[f"F{i}"] = 0x70 + (i - 1)
@@ -505,12 +516,15 @@ def get_mouse_action_name(action: dict) -> str:
 def get_mouse_action_details(action: dict, title: str | None = None) -> str:
     prefix = f"[{title}] " if title else ""
     action_type = action.get("type", "click")
+    suffix = ""
+    if action.get("delay") is not None:
+        suffix = f" (+{action['delay']}ms)"
     if action_type == "click":
         button = MOUSE_BUTTON_LABELS.get(action.get("button", "left"), "Left")
-        return f"{prefix}{button} at ({int(action['x'])}, {int(action['y'])})"
+        return f"{prefix}{button} at ({int(action['x'])}, {int(action['y'])}){suffix}"
     if action_type == "wheel":
         delta = coerce_wheel_delta(action.get("delta"), -1)
-        return f"{prefix}Delta {delta} at ({int(action['x'])}, {int(action['y'])})"
+        return f"{prefix}Delta {delta} at ({int(action['x'])}, {int(action['y'])}){suffix}"
     return f"Delay: {action['ms']}ms"
 
 
@@ -1044,6 +1058,7 @@ class ClickerApp:
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
         self.step_delay_var = tk.StringVar()
+        self.custom_delay_var = tk.StringVar()
         self.mouse_button_var = tk.StringVar(value="left")
         self.loop_var = tk.BooleanVar(value=True)
         self.pure_background_window_click_var = tk.BooleanVar(value=DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
@@ -1294,12 +1309,17 @@ class ClickerApp:
         self.screen_button_combo.grid(row=1, column=1, sticky="w", padx=4, pady=(6, 0))
         self.screen_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.screen_button_combo)
+
+        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
+        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=12)
+        self.screen_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
+
         ttk.Label(
             prop_frame,
             text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=3, sticky="w")
+        ).grid(row=2, column=0, columnspan=4, sticky="w")
 
         # Row 4: Controls
         action_bar = ttk.Frame(frame)
@@ -1388,6 +1408,7 @@ class ClickerApp:
         # Selected Item Properties for Window Mode
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
         win_prop_frame.pack(fill="x", pady=(8, 0))
+        win_prop_frame.columnconfigure(3, weight=1)
         
         self.window_prop_label = ttk.Label(win_prop_frame, text="Value:")
         self.window_prop_label.grid(row=0, column=0, sticky="w")
@@ -1405,12 +1426,17 @@ class ClickerApp:
         self.window_button_combo.grid(row=1, column=1, sticky="w", padx=4, pady=(6, 0))
         self.window_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.window_button_combo)
+
+        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
+        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=12)
+        self.window_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
+
         ttk.Label(
             win_prop_frame,
             text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=3, sticky="w")
+        ).grid(row=2, column=0, columnspan=4, sticky="w")
 
     def _on_tab_changed(self, event):
         """Show only the dots belonging to the active tab."""
@@ -1621,12 +1647,105 @@ class ClickerApp:
         """Open a dialog to select a window from all visible windows."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Select Window (Auto-refreshing)")
-        dialog.geometry("460x420")
+        dialog.geometry("480x520")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        ttk.Label(dialog, text="Select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
-
+        # 1. Drag & Drop Targeting Tool Frame
+        drag_frame = ttk.LabelFrame(dialog, text="Drag & Drop Targeting Tool", padding=10)
+        drag_frame.pack(fill="x", padx=10, pady=(8, 4))
+        
+        info_label = ttk.Label(drag_frame, text="Drag the target icon onto any window to add it automatically:", foreground="#555555")
+        info_label.pack(anchor="w", pady=(0, 6))
+        
+        tool_row = ttk.Frame(drag_frame)
+        tool_row.pack(fill="x")
+        
+        target_canvas = tk.Canvas(tool_row, width=44, height=44, bg="#deecf9", highlightthickness=1, highlightbackground="#0078d7", cursor="crosshair")
+        target_canvas.pack(side="left", padx=(0, 10))
+        
+        # Draw target icon inside target_canvas
+        target_canvas.create_oval(10, 10, 34, 34, outline="#0078d7", width=2)
+        target_canvas.create_oval(18, 18, 26, 26, fill="#0078d7", outline="")
+        target_canvas.create_line(4, 22, 40, 22, fill="#0078d7", width=2)
+        target_canvas.create_line(22, 4, 22, 40, fill="#0078d7", width=2)
+        
+        status_var = tk.StringVar(value="Hold & drag the crosshair target...")
+        status_label = ttk.Label(tool_row, textvariable=status_var, font=("Segoe UI", 9, "bold"), foreground="#0078d7", wraplength=350)
+        status_label.pack(side="left", fill="both", expand=True)
+        
+        drag_hwnd = None
+        drag_title = ""
+        
+        def on_drag_start(event):
+            nonlocal drag_hwnd, drag_title
+            drag_hwnd = None
+            drag_title = ""
+            status_var.set("Dragging... Hover over any window.")
+            status_label.config(foreground="#106ebe")
+            
+        def on_drag_motion(event):
+            nonlocal drag_hwnd, drag_title
+            try:
+                sx, sy = win32api.GetCursorPos()
+                hwnd = win32gui.WindowFromPoint((sx, sy))
+                hwnd = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
+                
+                # Exclude our own windows
+                dialog_hwnd = dialog.winfo_id()
+                main_hwnd = self.root.winfo_id()
+                
+                is_our_win = False
+                curr = hwnd
+                while curr:
+                    if curr == dialog_hwnd or curr == main_hwnd:
+                        is_our_win = True
+                        break
+                    curr = win32gui.GetParent(curr)
+                
+                if is_our_win:
+                    status_var.set("Cannot select ClickTool window itself!")
+                    drag_hwnd = None
+                    drag_title = ""
+                else:
+                    title = get_window_title(hwnd)
+                    if title:
+                        drag_hwnd = hwnd
+                        drag_title = title
+                        status_var.set(f"Target: '{title}'")
+                    else:
+                        status_var.set("Hovering unnamed window...")
+                        drag_hwnd = None
+                        drag_title = ""
+            except Exception as e:
+                status_var.set(f"Error: {e}")
+                
+        def on_drag_release(event):
+            nonlocal drag_hwnd, drag_title
+            status_label.config(foreground="#0078d7")
+            if drag_hwnd and drag_title:
+                hwnd = drag_hwnd
+                title = drag_title
+                if any(w["hwnd"] == hwnd for w in self._target_windows):
+                    messagebox.showinfo("Already Added", f"Window '{title}' is already in your target list.")
+                else:
+                    self._target_windows.append({"hwnd": hwnd, "title": title})
+                    self._refresh_window_list()
+                    new_idx = len(self._target_windows) - 1
+                    self.target_win_list.selection_clear(0, "end")
+                    self.target_win_list.selection_set(new_idx)
+                    self.target_win_list.activate(new_idx)
+                    dialog.destroy()
+            else:
+                status_var.set("Hold & drag the crosshair target...")
+                
+        target_canvas.bind("<Button-1>", on_drag_start)
+        target_canvas.bind("<B1-Motion>", on_drag_motion)
+        target_canvas.bind("<ButtonRelease-1>", on_drag_release)
+        
+        # 2. List Selection Frame
+        ttk.Label(dialog, text="Or select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
+        
         list_frame = ttk.Frame(dialog)
         list_frame.pack(fill="both", expand=True, padx=10)
         
@@ -1656,7 +1775,6 @@ class ClickerApp:
             user32.EnumWindows(enum_proc, 0)
             new_windows.sort(key=lambda x: x[1].lower())
             
-            # Update only if changed to preserve selection if possible
             if new_windows != current_windows:
                 sel = lb.curselection()
                 selected_hwnd = current_windows[sel[0]][0] if sel else None
@@ -1679,13 +1797,11 @@ class ClickerApp:
             sel = lb.curselection()
             if sel:
                 hwnd, title = current_windows[sel[0]]
-                # Check if already in list
                 if any(w["hwnd"] == hwnd for w in self._target_windows):
                     messagebox.showinfo("Already Added", "This window is already in your target list.")
                 else:
                     self._target_windows.append({"hwnd": hwnd, "title": title})
                     self._refresh_window_list()
-                    # Select the newly added window
                     new_idx = len(self._target_windows) - 1
                     self.target_win_list.selection_clear(0, "end")
                     self.target_win_list.selection_set(new_idx)
@@ -1818,14 +1934,20 @@ class ClickerApp:
             self.screen_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
             self.screen_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
         else:
             self.screen_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
+            self.custom_delay_var.set("")
+            self.screen_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
 
     def remove_screen_position(self) -> None:
@@ -2043,14 +2165,20 @@ class ClickerApp:
             self.window_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
             self.window_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
         else:
             self.window_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
+            self.custom_delay_var.set("")
+            self.window_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
 
     def remove_window_position(self) -> None:
@@ -2130,6 +2258,19 @@ class ClickerApp:
         
         val = self.step_delay_var.get().strip()
         index = self.screen_tree.index(sel[0]) if editing_screen else self.window_pt_tree.index(sel[0])
+
+        # Parse custom step delay
+        custom_delay_str = self.custom_delay_var.get().strip()
+        custom_delay = None
+        if custom_delay_str:
+            try:
+                custom_delay = int(custom_delay_str)
+                if custom_delay < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid Step Delay", "Enter a non-negative whole number for custom step delay.")
+                return
+
         if not val:
             if positions[index]["type"] == "click":
                 pass # Can't clear pos via delay entry easily
@@ -2149,6 +2290,7 @@ class ClickerApp:
                         if self.mouse_button_var.get() in MOUSE_BUTTONS
                         else "left"
                     )
+                    positions[index]["delay"] = custom_delay
                 elif positions[index]["type"] == "wheel":
                     parts = [p.strip() for p in val.split(',')]
                     if len(parts) == 1:
@@ -2159,6 +2301,7 @@ class ClickerApp:
                         positions[index]["delta"] = coerce_wheel_delta(parts[2], -1)
                     else:
                         raise ValueError
+                    positions[index]["delay"] = custom_delay
                 else:
                     ms = int(val)
                     if ms < 0: raise ValueError
