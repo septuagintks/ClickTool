@@ -180,6 +180,63 @@ MODIFIER_STATE_BITS = {
 }
 MODIFIER_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R"}
 
+VK_MAP = {
+    "ESC": 0x1B,
+    "ENTER": 0x0D,
+    "SPACE": 0x20,
+    "TAB": 0x09,
+    "DELETE": 0x2E,
+    "BACKSPACE": 0x08,
+    "PAGEUP": 0x21,
+    "PAGEDOWN": 0x22,
+    "END": 0x23,
+    "HOME": 0x24,
+    "LEFT": 0x25,
+    "UP": 0x26,
+    "RIGHT": 0x27,
+    "DOWN": 0x28,
+    "INSERT": 0x2D,
+}
+for i in range(1, 13):
+    VK_MAP[f"F{i}"] = 0x70 + (i - 1)
+for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    VK_MAP[c] = ord(c)
+for c in "0123456789":
+    VK_MAP[c] = ord(c)
+
+
+def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
+    if not hotkey_str:
+        return False
+    parts = [p.strip().upper() for p in hotkey_str.split("+") if p.strip()]
+    if not parts:
+        return False
+    modifiers_needed = {
+        "CTRL": 0x11,  # VK_CONTROL
+        "ALT": 0x12,   # VK_MENU
+        "SHIFT": 0x10, # VK_SHIFT
+    }
+    for mod_name, vk_code in modifiers_needed.items():
+        is_pressed = (user32.GetAsyncKeyState(vk_code) & 0x8000) != 0
+        if mod_name in parts:
+            if not is_pressed:
+                return False
+        else:
+            if is_pressed:
+                return False
+    main_keys = [p for p in parts if p not in modifiers_needed]
+    if not main_keys:
+        return False
+    main_key_str = main_keys[0]
+    vk = VK_MAP.get(main_key_str)
+    if vk is None:
+        if len(main_key_str) == 1:
+            vk = ord(main_key_str)
+        else:
+            return False
+    return (user32.GetAsyncKeyState(vk) & 0x8000) != 0
+
+
 class RECT(ctypes.Structure):
     _fields_ = [
         ("left", ctypes.c_long),
@@ -270,6 +327,14 @@ def get_auto_log_path() -> str:
 def write_auto_log(log_path: str | None, message: str) -> None:
     if not log_path:
         return
+    try:
+        if os.path.exists(log_path) and os.path.getsize(log_path) > 1024 * 1024:
+            old_path = log_path + ".old"
+            if os.path.exists(old_path):
+                os.remove(old_path)
+            os.rename(log_path, old_path)
+    except Exception:
+        pass
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_path, "a", encoding="utf-8") as f:
@@ -756,7 +821,17 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if is_position_action(action):
                 if mode == "window":
                     hwnd = window_map.get(action.get("win_title"))
-                    if hwnd:
+                    if not hwnd or not user32.IsWindow(hwnd):
+                        active_windows = list_visible_windows()
+                        title = action.get("win_title")
+                        found_hwnd = next((h for h, t in active_windows if t == title), None)
+                        if not found_hwnd:
+                            found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                        if found_hwnd:
+                            hwnd = found_hwnd
+                            window_map[title] = hwnd
+                            write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
+                    if hwnd and user32.IsWindow(hwnd):
                         if perform_window_mouse_action(hwnd, action, pure_background):
                             round_clicks += 1
                             write_auto_log(log_path, f"ran window action type={action_type} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
@@ -845,17 +920,18 @@ def main(argv: list[str] | None = None) -> int:
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
-    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None, pure_background=False):
+    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None, pure_background=False, action_type="click"):
         super().__init__(master)
         self.index = index  # 0-based index
         self.on_move = on_move
         self.on_click = on_click
         self.hwnd = hwnd # If set, x and y are relative to this window's top-left
         self.pure_background = pure_background
+        self.action_type = action_type
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.7)
+        self.attributes("-alpha", 0.75)
         
         # Initialize position
         if self.hwnd:
@@ -877,18 +953,47 @@ class DraggableDot(tk.Toplevel):
         self.config(bg='white')
         self.attributes("-transparentcolor", "white")
         
-        # 1. Outer halo border (Light Blue)
-        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#87CEFA", outline="")
+        # Determine colors based on action type
+        if action_type == "wheel":
+            halo_color = "#f1cbe9"  # Light Purple
+            dot_color = "#b4009e"   # Purple/Magenta
+        else:
+            halo_color = "#c7e0f4"  # Light Blue
+            dot_color = "#0078d7"   # Primary Blue
+            
+        # 1. Outer halo border
+        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill=halo_color, outline="")
         
-        # 2. Main Dot (Primary Blue)
+        # 2. Main Dot
         inner_m = 6
-        self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill="#0078d7", outline="white", width=1)
+        self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill=dot_color, outline="white", width=1)
         
-        # 3. Sequence Number
-        self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Arial", 10, "bold"))
+        # 3. Sequence Number (Modern clean Segoe UI font)
+        self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Segoe UI", 9, "bold"))
+        
+        # 4. Glossy 3D Highlight Reflection
+        self.highlight = self.canvas.create_oval(11, 11, 17, 15, fill="white", outline="")
         
         self.canvas.bind("<Button-1>", self._on_start)
         self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, event):
+        if self.action_type == "wheel":
+            self.canvas.itemconfig(self.halo, fill="#e2b1d6") # richer purple halo
+            self.canvas.itemconfig(self.circle, fill="#881794") # richer active purple
+        else:
+            self.canvas.itemconfig(self.halo, fill="#a9d1f5") # richer blue halo
+            self.canvas.itemconfig(self.circle, fill="#106ebe") # richer active blue
+
+    def _on_leave(self, event):
+        if self.action_type == "wheel":
+            self.canvas.itemconfig(self.halo, fill="#f1cbe9")
+            self.canvas.itemconfig(self.circle, fill="#b4009e")
+        else:
+            self.canvas.itemconfig(self.halo, fill="#c7e0f4")
+            self.canvas.itemconfig(self.circle, fill="#0078d7")
         
     def update_position(self, x, y):
         """Update window geometry based on center coordinate."""
@@ -971,7 +1076,66 @@ class ClickerApp:
         self.sync_dots_loop()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def _apply_ui_theme(self) -> None:
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+            
+        bg_main = "#f3f2f1"
+        bg_card = "#ffffff"
+        fg_text = "#323130"
+        primary = "#0078d7"
+        primary_hover = "#106ebe"
+        primary_light = "#deecf9"
+        border_color = "#d2d0ce"
+        
+        style.configure(".", background=bg_main, foreground=fg_text, font=("Segoe UI", 9))
+        style.configure("TFrame", background=bg_main)
+        style.configure("TLabelframe", background=bg_main, bordercolor=border_color, borderwidth=1)
+        style.configure("TLabelframe.Label", background=bg_main, foreground="#605e5c", font=("Segoe UI", 9, "bold"))
+        
+        style.configure("TButton", padding=(8, 4), background=bg_card, bordercolor=border_color, focuscolor="", relief="flat")
+        style.map("TButton",
+            background=[("active", primary_light), ("disabled", "#f3f2f1")],
+            foreground=[("active", primary), ("disabled", "#a19f9d")],
+            bordercolor=[("active", primary)]
+        )
+        
+        style.configure("Accent.TButton", padding=(8, 4), background=primary, foreground="#ffffff", bordercolor=primary, focuscolor="", relief="flat")
+        style.map("Accent.TButton",
+            background=[("active", primary_hover), ("disabled", "#f3f2f1")],
+            foreground=[("active", "#ffffff"), ("disabled", "#a19f9d")],
+            bordercolor=[("active", primary_hover)]
+        )
+        
+        style.configure("TEntry", padding=4, insertcolor=fg_text, bordercolor=border_color, fieldbackground=bg_card)
+        style.map("TEntry",
+            bordercolor=[("focus", primary), ("hover", "#8a8886")]
+        )
+        
+        style.configure("TCheckbutton", background=bg_main, focuscolor="")
+        style.configure("TCombobox", padding=4, arrowsize=12, bordercolor=border_color, fieldbackground=bg_card)
+        style.map("TCombobox",
+            bordercolor=[("focus", primary), ("hover", "#8a8886")]
+        )
+        
+        style.configure("TNotebook", background=bg_main, bordercolor=border_color, borderwidth=1)
+        style.configure("TNotebook.Tab", background="#e1dfdd", padding=(12, 6), bordercolor=border_color, lightcolor="#e1dfdd")
+        style.map("TNotebook.Tab",
+            background=[("selected", bg_card), ("active", "#deecf9")],
+            lightcolor=[("selected", bg_card)],
+            bordercolor=[("selected", border_color)]
+        )
+        
+        style.configure("Treeview", background=bg_card, fieldbackground=bg_card, rowheight=24, bordercolor=border_color, borderwidth=1)
+        style.configure("Treeview.Heading", background="#e1dfdd", foreground=fg_text, font=("Segoe UI", 9, "bold"), padding=4)
+        style.map("Treeview",
+            background=[("selected", primary_light)],
+            foreground=[("selected", fg_text)]
+        )
+
     def _build_ui(self) -> None:
+        self._apply_ui_theme()
         # Notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True)
@@ -1002,7 +1166,7 @@ class ClickerApp:
         ttk.Label(run_frame, text="Interval").pack(side="left")
         ttk.Entry(run_frame, textvariable=self.interval_var, width=8).pack(side="left", padx=(4, 8))
         ttk.Checkbutton(run_frame, text="Loop", variable=self.loop_var).pack(side="left", padx=(0, 8))
-        self.start_button = ttk.Button(run_frame, text="Start", command=self.start_clicking, width=8)
+        self.start_button = ttk.Button(run_frame, text="Start", command=self.start_clicking, width=8, style="Accent.TButton")
         self.start_button.pack(side="left", padx=(0, 4))
         self.stop_button = ttk.Button(run_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
         self.stop_button.pack(side="left")
@@ -1277,6 +1441,23 @@ class ClickerApp:
         current_tab = self.notebook.index(self.notebook.select())
         
         if current_tab == 1 and not is_clicking:
+            active_windows = None
+            for w in self._target_windows:
+                hwnd = w["hwnd"]
+                if not hwnd or not user32.IsWindow(hwnd):
+                    if active_windows is None:
+                        active_windows = list_visible_windows()
+                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
+                    if not found_hwnd:
+                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    if found_hwnd:
+                        w["hwnd"] = found_hwnd
+                        for p in self._window_positions:
+                            if p.get("win_title") == w["title"]:
+                                p["hwnd"] = found_hwnd
+                                if is_position_action(p) and "dot" in p:
+                                    p["dot"].hwnd = found_hwnd
+
             for p in self._window_positions:
                 if not is_position_action(p):
                     continue
@@ -1545,7 +1726,7 @@ class ClickerApp:
         
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
-                          on_click=self._on_screen_dot_click)
+                          on_click=self._on_screen_dot_click, action_type="click")
         
         self._screen_positions.append({
             "type": "click",
@@ -1577,6 +1758,7 @@ class ClickerApp:
             y,
             self._on_screen_dot_move,
             on_click=self._on_screen_dot_click,
+            action_type="wheel",
         )
 
         self._screen_positions.append({
@@ -1740,7 +1922,7 @@ class ClickerApp:
         index = len(self._window_positions)
         dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
                           on_click=self._on_window_dot_click, hwnd=hwnd,
-                          pure_background=self.pure_background_window_click_var.get())
+                          pure_background=self.pure_background_window_click_var.get(), action_type="click")
         
         self._window_positions.append({
             "type": "click",
@@ -1798,6 +1980,7 @@ class ClickerApp:
             on_click=self._on_window_dot_click,
             hwnd=hwnd,
             pure_background=self.pure_background_window_click_var.get(),
+            action_type="wheel",
         )
 
         self._window_positions.append({
@@ -2088,6 +2271,7 @@ class ClickerApp:
                     p_data["y"],
                     self._on_screen_dot_move,
                     on_click=self._on_screen_dot_click,
+                    action_type=p_data.get("type", "click"),
                 )
                 action = {
                     "type": p_data.get("type", "click"),
@@ -2134,6 +2318,7 @@ class ClickerApp:
                     on_click=self._on_window_dot_click,
                     hwnd=found_hwnd,
                     pure_background=self.pure_background_window_click_var.get(),
+                    action_type=p_data.get("type", "click"),
                 )
                 action = {
                     "type": p_data.get("type", "click"),
@@ -2291,6 +2476,23 @@ class ClickerApp:
             return
             
         mode = self._active_mode
+        if mode == "window":
+            # Re-resolve target windows with invalid HWNDs by title match before starting
+            active_windows = list_visible_windows()
+            for w in self._target_windows:
+                hwnd = w["hwnd"]
+                if not hwnd or not user32.IsWindow(hwnd):
+                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
+                    if not found_hwnd:
+                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    if found_hwnd:
+                        w["hwnd"] = found_hwnd
+                        for p in self._window_positions:
+                            if p.get("win_title") == w["title"]:
+                                p["hwnd"] = found_hwnd
+                                if is_position_action(p) and "dot" in p:
+                                    p["dot"].hwnd = found_hwnd
+
         if mode == "screen":
             positions = self._screen_positions
         else:
@@ -2346,10 +2548,16 @@ class ClickerApp:
                 else: p["dot"].withdraw()
 
     def _watch_escape(self) -> None:
+        stop_hotkey = self.hotkey_vars["stop"].get()
         while not self._stop_event.wait(0.03):
-            if user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
-                self._stop_event.set()
-                break
+            if stop_hotkey:
+                if is_hotkey_pressed_globally(stop_hotkey):
+                    self._stop_event.set()
+                    break
+            else:
+                if user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
+                    self._stop_event.set()
+                    break
 
     def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str, pure_background: bool) -> None:
         while not self._stop_event.is_set():
@@ -2361,8 +2569,26 @@ class ClickerApp:
                 action_type = action.get("type", "click")
                 if is_position_action(action):
                     if mode == "window":
-                        if not perform_window_mouse_action(action["hwnd"], action, pure_background):
-                            pass # Or continue
+                        hwnd = action.get("hwnd")
+                        if not hwnd or not user32.IsWindow(hwnd):
+                            active_windows = list_visible_windows()
+                            title = action.get("win_title")
+                            found_hwnd = next((h for h, t in active_windows if t == title), None)
+                            if not found_hwnd:
+                                found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                            if found_hwnd:
+                                hwnd = found_hwnd
+                                action["hwnd"] = hwnd
+                                for w in self._target_windows:
+                                    if w["title"] == title:
+                                        w["hwnd"] = hwnd
+                                for p in self._window_positions:
+                                    if p.get("win_title") == title:
+                                        p["hwnd"] = hwnd
+                                        if is_position_action(p) and "dot" in p:
+                                            p["dot"].hwnd = hwnd
+                        if hwnd and user32.IsWindow(hwnd):
+                            perform_window_mouse_action(hwnd, action, pure_background)
                     else:
                         perform_screen_mouse_action(action)
 

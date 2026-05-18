@@ -19,7 +19,7 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
 3. Start the app:
 
    ```bash
-   python main.py
+   python clicktool.py
    ```
 
 ### Task Scheduler Automation
@@ -39,7 +39,7 @@ tool.exe --auto --silent
 For script testing, the same automation path can be started with:
 
 ```bash
-python main.py --auto --silent
+python clicktool.py --auto --silent
 ```
 
 Automation behavior:
@@ -102,7 +102,7 @@ Automation behavior:
 You can compile this tool into a standalone executable using `nuitka`:
 
 ```bash
-nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter main.py
+nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter clicktool.py
 ```
 
 *Note: Requires `pywin32` to be installed in the build environment.*
