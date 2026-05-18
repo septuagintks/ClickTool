@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local development notes
+/DEVELOPMENT_OVERVIEW.md
+
 # C extensions
 *.so
 
