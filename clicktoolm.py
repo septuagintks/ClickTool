@@ -88,6 +88,14 @@ user32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, POINT, wintypes.UINT]
 user32.ChildWindowFromPointEx.restype = wintypes.HWND
 user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
 user32.ScreenToClient.restype = wintypes.BOOL
+user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+user32.GetCursorPos.restype = wintypes.BOOL
+user32.WindowFromPoint.argtypes = [POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+user32.GetParent.argtypes = [wintypes.HWND]
+user32.GetParent.restype = wintypes.HWND
 
 CWP_ALL = 0x0000
 CWP_SKIPINVISIBLE = 0x0001
@@ -811,12 +819,105 @@ class ClickerApp:
         """Open a dialog to select a window from all visible windows."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Select Window (Auto-refreshing)")
-        dialog.geometry("460x420")
+        dialog.geometry("480x520")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        ttk.Label(dialog, text="Select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
-
+        # 1. Drag & Drop Targeting Tool Frame
+        drag_frame = ttk.LabelFrame(dialog, text="Drag & Drop Targeting Tool", padding=10)
+        drag_frame.pack(fill="x", padx=10, pady=(8, 4))
+        
+        info_label = ttk.Label(drag_frame, text="Drag the target icon onto any window to add it automatically:", foreground="#555555")
+        info_label.pack(anchor="w", pady=(0, 6))
+        
+        tool_row = ttk.Frame(drag_frame)
+        tool_row.pack(fill="x")
+        
+        target_canvas = tk.Canvas(tool_row, width=44, height=44, bg="#deecf9", highlightthickness=1, highlightbackground="#0078d7", cursor="crosshair")
+        target_canvas.pack(side="left", padx=(0, 10))
+        
+        # Draw target icon inside target_canvas
+        target_canvas.create_oval(10, 10, 34, 34, outline="#0078d7", width=2)
+        target_canvas.create_oval(18, 18, 26, 26, fill="#0078d7", outline="")
+        target_canvas.create_line(4, 22, 40, 22, fill="#0078d7", width=2)
+        target_canvas.create_line(22, 4, 22, 40, fill="#0078d7", width=2)
+        
+        status_var = tk.StringVar(value="Hold & drag the crosshair target...")
+        status_label = ttk.Label(tool_row, textvariable=status_var, font=("Segoe UI", 9, "bold"), foreground="#0078d7", wraplength=350)
+        status_label.pack(side="left", fill="both", expand=True)
+        
+        drag_hwnd = None
+        drag_title = ""
+        
+        def on_drag_start(event):
+            nonlocal drag_hwnd, drag_title
+            drag_hwnd = None
+            drag_title = ""
+            status_var.set("Dragging... Hover over any window.")
+            status_label.config(foreground="#106ebe")
+            
+        def on_drag_motion(event):
+            nonlocal drag_hwnd, drag_title
+            try:
+                pt = POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    hwnd = user32.WindowFromPoint(pt)
+                    hwnd = user32.GetAncestor(hwnd, 2) # GA_ROOT
+                    
+                    dialog_hwnd = int(dialog.winfo_id())
+                    main_hwnd = int(self.root.winfo_id())
+                    
+                    is_our_win = False
+                    curr = hwnd
+                    while curr:
+                        if curr == dialog_hwnd or curr == main_hwnd:
+                            is_our_win = True
+                            break
+                        curr = user32.GetParent(curr)
+                    
+                    if is_our_win:
+                        status_var.set("Cannot select ClickTool window itself!")
+                        drag_hwnd = None
+                        drag_title = ""
+                    else:
+                        title = get_window_title(hwnd)
+                        if title:
+                            drag_hwnd = hwnd
+                            drag_title = title
+                            status_var.set(f"Target: '{title}'")
+                        else:
+                            status_var.set("Hovering unnamed window...")
+                            drag_hwnd = None
+                            drag_title = ""
+            except Exception as e:
+                status_var.set(f"Error: {e}")
+                
+        def on_drag_release(event):
+            nonlocal drag_hwnd, drag_title
+            status_label.config(foreground="#0078d7")
+            if drag_hwnd and drag_title:
+                hwnd = drag_hwnd
+                title = drag_title
+                if any(w["hwnd"] == hwnd for w in self._target_windows):
+                    messagebox.showinfo("Already Added", f"Window '{title}' is already in your target list.")
+                else:
+                    self._target_windows.append({"hwnd": hwnd, "title": title})
+                    self._refresh_window_list()
+                    new_idx = len(self._target_windows) - 1
+                    self.target_win_list.selection_clear(0, "end")
+                    self.target_win_list.selection_set(new_idx)
+                    self.target_win_list.activate(new_idx)
+                    dialog.destroy()
+            else:
+                status_var.set("Hold & drag the crosshair target...")
+                
+        target_canvas.bind("<Button-1>", on_drag_start)
+        target_canvas.bind("<B1-Motion>", on_drag_motion)
+        target_canvas.bind("<ButtonRelease-1>", on_drag_release)
+        
+        # 2. List Selection Frame
+        ttk.Label(dialog, text="Or select a window from the list:").pack(anchor="w", padx=10, pady=(8, 4))
+        
         list_frame = ttk.Frame(dialog)
         list_frame.pack(fill="both", expand=True, padx=10)
         
@@ -846,7 +947,6 @@ class ClickerApp:
             user32.EnumWindows(enum_proc, 0)
             new_windows.sort(key=lambda x: x[1].lower())
             
-            # Update only if changed to preserve selection if possible
             if new_windows != current_windows:
                 sel = lb.curselection()
                 selected_hwnd = current_windows[sel[0]][0] if sel else None
@@ -869,13 +969,11 @@ class ClickerApp:
             sel = lb.curselection()
             if sel:
                 hwnd, title = current_windows[sel[0]]
-                # Check if already in list
                 if any(w["hwnd"] == hwnd for w in self._target_windows):
                     messagebox.showinfo("Already Added", "This window is already in your target list.")
                 else:
                     self._target_windows.append({"hwnd": hwnd, "title": title})
                     self._refresh_window_list()
-                    # Select the newly added window
                     new_idx = len(self._target_windows) - 1
                     self.target_win_list.selection_clear(0, "end")
                     self.target_win_list.selection_set(new_idx)
