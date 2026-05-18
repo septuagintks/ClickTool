@@ -6,6 +6,9 @@ tmp_*
 hotkey_code.py
 main_ct.py
 
+# Local development notes
+/DEVELOPMENT_OVERVIEW.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
