@@ -20,9 +20,11 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 
 ### 2. Window Mode
 - **Target Windows**: Select specific windows to click within.
+- **Drag & Drop Targeting**: Hold and drag the crosshair icon onto any window to target it instantly (Spy++ style).
 - **Background Client Clicking**: Uses `PostMessage` and child-window detection for client-area clicks even when the window is not foregrounded.
 - **Client-Only Dots**: Window dots are limited to the client area. Title bar buttons are intentionally not supported.
 - **Smart Constraints**: Dots are locked within the client area and follow the window as it moves or resizes.
+- **Self-Healing Windows**: If a targeted window is closed and reopened, the tool automatically re-resolves it by title match.
 - **Cross-Window Sequencing**: Create sequences across multiple different windows.
 
 ### UI & UX Improvements
@@ -30,6 +32,7 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 - **Compact Controls**: Run controls share one bottom bar to leave more room for click lists.
 - **Optimized Dialogs**: Window selection dialogs use a tighter layout.
 - **Bidirectional Selection**: Clicking a dot on the screen automatically selects its corresponding entry in the list.
+- **Dot Hover Effects**: Dots visually highlight when the cursor hovers over them.
 
 ### General Features
 - **Loop Toggle**: Choose between continuous looping or a single execution of your click sequence.
@@ -37,8 +40,10 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 - **Auto-run Setup**: Save the current setup for `--auto --silent`.
 - **Auto-refreshing Window List**: The "Add Window" dialog automatically updates the list of available windows.
 - **Custom Delays**: Set unique wait times for each individual click point.
+- **Custom Hotkeys**: Configure Start/Stop keyboard shortcuts via the Settings tab (supports symbol keys like `Ctrl+.`).
+- **Global Hotkey Interception**: Start and stop sequences from any window without needing to focus ClickTool.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
-- **Emergency Stop**: Press **Esc** at any time to stop the clicking loop.
+- **Log Rotation**: Auto-run logs are automatically rotated when they exceed 1 MB.
 
 ## Usage
 
@@ -51,7 +56,8 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 5. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
 6. **Save/Load**: Use **Export** to save your configuration and **Import** to load it later.
 7. **Auto-run Setup**: Use **Save Auto** to write the startup config for `--auto --silent`.
-8. **Run**: Click **Start**. Press **Esc** to stop.
+8. **Configure Hotkeys**: Go to **Settings** tab to customize Start/Stop shortcuts.
+9. **Run**: Click **Start** or press your configured hotkey (default: **F8**). Press **ESC** (or your configured stop key) to stop.
 
 ## Dependencies
 - **None**: This is the lightweight version using direct Windows API calls.

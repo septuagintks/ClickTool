@@ -195,6 +195,81 @@ kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
+VK_MAP = {
+    "ESC": 0x1B,
+    "ENTER": 0x0D,
+    "SPACE": 0x20,
+    "TAB": 0x09,
+    "DELETE": 0x2E,
+    "BACKSPACE": 0x08,
+    "PAGEUP": 0x21,
+    "PAGEDOWN": 0x22,
+    "END": 0x23,
+    "HOME": 0x24,
+    "LEFT": 0x25,
+    "UP": 0x26,
+    "RIGHT": 0x27,
+    "DOWN": 0x28,
+    "INSERT": 0x2D,
+    ",": 0xBC,
+    ".": 0xBE,
+    "/": 0xBF,
+    ";": 0xBA,
+    "'": 0xDE,
+    "[": 0xDB,
+    "]": 0xDD,
+    "\\": 0xDC,
+    "-": 0xBD,
+    "=": 0xBB,
+    "`": 0xC0,
+}
+for i in range(1, 13):
+    VK_MAP[f"F{i}"] = 0x70 + (i - 1)
+for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    VK_MAP[c] = ord(c)
+for c in "0123456789":
+    VK_MAP[c] = ord(c)
+
+DEFAULT_HOTKEYS = {
+    "start": "F8",
+    "stop": "ESC",
+}
+
+HOTKEY_ACTIONS = (
+    ("start", "Start/Pause Sequence"),
+    ("stop", "Stop/Cancel Sequence"),
+)
+
+def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
+    if not hotkey_str:
+        return False
+    parts = [p.strip().upper() for p in hotkey_str.split("+") if p.strip()]
+    for p in parts:
+        vk = VK_MAP.get(p)
+        if vk is None:
+            if len(p) == 1:
+                vk = ord(p)
+            else:
+                return False
+        if not (user32.GetAsyncKeyState(vk) & 0x8000):
+            return False
+    return True
+
+def normalize_hotkey_text(value) -> str:
+    if not value: return ""
+    return "+".join(p.strip().upper() for p in str(value).split("+") if p.strip())
+
+def hotkey_from_event(event) -> str:
+    parts = []
+    if event.state & 4: parts.append("CTRL")
+    if event.state & 1: parts.append("SHIFT")
+    if event.state & 131072: parts.append("ALT")
+    key = event.keysym.upper()
+    if key in ("CONTROL_L", "CONTROL_R", "SHIFT_L", "SHIFT_R", "ALT_L", "ALT_R"):
+        pass
+    else:
+        parts.append(key)
+    return "+".join(parts)
 
 DOT_SIZE = 40
 APP_NAME = "ClickTool"
@@ -333,6 +408,9 @@ def normalize_script_data(data: dict) -> dict:
     auto["target_wait_seconds"] = coerce_non_negative_int(
         auto.get("target_wait_seconds"), DEFAULT_TARGET_WAIT_SECONDS
     )
+    hotkeys = settings.setdefault("hotkeys", {})
+    for action, default in DEFAULT_HOTKEYS.items():
+        hotkeys[action] = normalize_hotkey_text(hotkeys.get(action, default))
     return data
 
 
@@ -531,6 +609,11 @@ class ClickerApp:
         self.status_var = tk.StringVar(value="Ready")
         self._active_mode = "screen"
         
+        self.hotkey_vars = {
+            action: tk.StringVar(value=default)
+            for action, default in DEFAULT_HOTKEYS.items()
+        }
+        self._hotkey_map: dict[str, str] = {}
         # Screen Mode State
         self._screen_positions: list[dict] = []
         
@@ -543,7 +626,13 @@ class ClickerApp:
         self._escape_thread: threading.Thread | None = None
 
         self._build_ui()
+        self._apply_hotkeys(show_status=False)
         self.sync_dots_loop()
+        self.root.bind_all("<KeyPress>", self._on_key_press, add="+")
+        
+        self._hotkey_thread = threading.Thread(target=self._watch_global_hotkeys, daemon=True)
+        self._hotkey_thread.start()
+        
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _apply_ui_theme(self) -> None:
@@ -650,6 +739,45 @@ class ClickerApp:
             foreground="#555555",
             wraplength=500,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        
+        hotkey_frame = ttk.LabelFrame(frame, text="Shortcuts", padding=10)
+        hotkey_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        for col in range(4):
+            hotkey_frame.columnconfigure(col, weight=1)
+
+        for index, (action, label) in enumerate(HOTKEY_ACTIONS):
+            row = index // 2
+            col = (index % 2) * 2
+            ttk.Label(hotkey_frame, text=label).grid(row=row, column=col, sticky="w", pady=2, padx=(0, 6))
+            ttk.Entry(hotkey_frame, textvariable=self.hotkey_vars[action], width=18).grid(
+                row=row, column=col + 1, sticky="ew", pady=2, padx=(0, 6)
+            )
+            self.root.bind(
+                f"<FocusIn>",
+                lambda e, a=action: self._bind_hotkey_capture(a) if str(e.widget) == str(self.hotkey_vars[a]._root) else None,
+            )
+
+        ttk.Button(hotkey_frame, text="Apply Shortcuts", command=self._apply_hotkeys).grid(
+            row=(len(HOTKEY_ACTIONS) + 1) // 2,
+            column=0,
+            columnspan=2,
+            sticky="e",
+            pady=(12, 0),
+            padx=(0, 6),
+        )
+        ttk.Button(hotkey_frame, text="Reset", command=self.reset_hotkeys).grid(
+            row=(len(HOTKEY_ACTIONS) + 1) // 2,
+            column=2,
+            columnspan=2,
+            sticky="w",
+            pady=(12, 0),
+        )
+        ttk.Label(
+            hotkey_frame,
+            text="Press keys to capture. Delete text to disable.",
+            font=("", 8),
+            foreground="#666666",
+        ).grid(row=((len(HOTKEY_ACTIONS) + 1) // 2) + 1, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     def _build_screen_mode_ui(self, frame) -> None:
         # Row 1: Position List Label
@@ -1279,6 +1407,64 @@ class ClickerApp:
         refresh_fn(index)
         self.status_var.set(f"Updated delay for item {index+1}.")
 
+    def reset_hotkeys(self) -> None:
+        for action, default in DEFAULT_HOTKEYS.items():
+            self.hotkey_vars[action].set(default)
+        self._apply_hotkeys()
+
+    def _apply_hotkeys(self, show_status: bool = True) -> bool:
+        seen = {}
+        hotkey_map: dict[str, str] = {}
+        for action, label in HOTKEY_ACTIONS:
+            hotkey = normalize_hotkey_text(self.hotkey_vars[action].get())
+            self.hotkey_vars[action].set(hotkey)
+            if not hotkey:
+                continue
+            if hotkey in seen:
+                messagebox.showerror("Duplicate Shortcut", f"{label} and {seen[hotkey]} both use {hotkey}.")
+                return False
+            seen[hotkey] = label
+            hotkey_map[hotkey] = action
+            
+        self._hotkey_map = hotkey_map
+        if show_status:
+            self.status_var.set("Shortcuts applied successfully.")
+        return True
+
+    def _bind_hotkey_capture(self, action: str):
+        def capture(e):
+            if e.keysym == "BackSpace":
+                self.hotkey_vars[action].set("")
+                return "break"
+            hk = hotkey_from_event(e)
+            if hk and not hk in ("CTRL", "SHIFT", "ALT"):
+                self.hotkey_vars[action].set(hk)
+                return "break"
+            return None
+            
+        entry = self.hotkey_vars[action]._root.nametowidget(self.root.focus_get())
+        entry.bind("<KeyPress>", capture, add="+")
+
+    def _on_key_press(self, event) -> str | None:
+        hotkey = hotkey_from_event(event)
+        action = self._hotkey_map.get(hotkey)
+        if not action:
+            return None
+        if self._handle_hotkey_action(action):
+            return "break"
+        return None
+
+    def _handle_hotkey_action(self, action: str) -> bool:
+        if action == "start":
+            if not self._click_thread or not self._click_thread.is_alive():
+                self.root.after(0, self.start_clicking)
+            return True
+        elif action == "stop":
+            if self._click_thread and self._click_thread.is_alive():
+                self.root.after(0, self.stop_clicking)
+            return True
+        return False
+
     def start_clicking(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
             return
@@ -1349,9 +1535,12 @@ class ClickerApp:
         
         self.start_button.config(state="disabled")
         self.stop_button.config(state="normal")
-        self._escape_thread = threading.Thread(target=self._watch_escape, daemon=True)
-        self._escape_thread.start()
-        self.status_var.set("Looping clicks... Press Esc to stop.")
+        
+        stop_hotkey = self.hotkey_vars["stop"].get()
+        if stop_hotkey:
+            self.status_var.set(f"Looping clicks... Press {stop_hotkey} to stop.")
+        else:
+            self.status_var.set("Looping clicks... (No stop hotkey set)")
 
     def stop_clicking(self) -> None:
         self._stop_event.set()
@@ -1365,11 +1554,22 @@ class ClickerApp:
             if visible: p["dot"].deiconify()
             else: p["dot"].withdraw()
 
-    def _watch_escape(self) -> None:
-        while not self._stop_event.wait(0.03):
-            if user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
-                self._stop_event.set()
-                break
+    def _watch_global_hotkeys(self) -> None:
+        while True:
+            time.sleep(0.03)
+            try:
+                stop_hk = self.hotkey_vars["stop"].get()
+                start_hk = self.hotkey_vars["start"].get()
+            except Exception:
+                continue
+
+            if stop_hk and is_hotkey_pressed_globally(stop_hk):
+                if self._click_thread and self._click_thread.is_alive():
+                    self._stop_event.set()
+            elif start_hk and is_hotkey_pressed_globally(start_hk):
+                if not self._click_thread or not self._click_thread.is_alive():
+                    self.root.after(0, self.start_clicking)
+                    time.sleep(0.5)
 
     def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str) -> None:
         global_interval_s = global_interval_ms / 1000.0
@@ -1435,7 +1635,13 @@ class ClickerApp:
             "mode": self._active_mode,
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
-            "settings": {"window_client_area_only": True},
+            "settings": {
+                "window_client_area_only": True,
+                "hotkeys": {
+                    action: normalize_hotkey_text(var.get())
+                    for action, var in self.hotkey_vars.items()
+                }
+            },
             "screen_positions": [
                 {"x": p["x"], "y": p["y"], "delay": p["delay"]}
                 for p in self._screen_positions
@@ -1482,6 +1688,13 @@ class ClickerApp:
         # Restore global interval
         self.interval_var.set(data.get("global_interval", "500"))
         self.loop_var.set(data.get("loop", True))
+        
+        # Restore hotkeys
+        settings = data.get("settings", {})
+        hotkeys = settings.get("hotkeys", {})
+        for action, default in DEFAULT_HOTKEYS.items():
+            self.hotkey_vars[action].set(hotkeys.get(action, default))
+        self._apply_hotkeys(show_status=False)
         
         # Restore screen positions
         for p_data in data.get("screen_positions", []):
@@ -1552,7 +1765,13 @@ class ClickerApp:
             "mode": self._active_mode,
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
-            "settings": {"window_client_area_only": True},
+            "settings": {
+                "window_client_area_only": True,
+                "hotkeys": {
+                    action: normalize_hotkey_text(var.get())
+                    for action, var in self.hotkey_vars.items()
+                }
+            },
             "screen_positions": [
                 {"x": p["x"], "y": p["y"], "delay": p["delay"]}
                 for p in self._screen_positions
