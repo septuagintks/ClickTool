@@ -1,4 +1,8 @@
 # Byte-compiled / optimized / DLL files
+temp_*
+tmp_*
+*_temp.py
+*_tmp.py
 __pycache__/
 *.py[codz]
 *$py.class
@@ -226,3 +230,8 @@ __marimo__/
 *.onefile-build/
 *.exe
 *.bin
+
+# Temporary files
+*.tmp
+*.temp
+**/temp/**
