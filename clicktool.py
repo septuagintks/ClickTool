@@ -769,10 +769,12 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     write_auto_log(log_path, f"target windows={data.get('target_windows', [])}")
     write_auto_log(log_path, f"action count={len(data.get('actions', []))}")
 
-    positions: list[dict] = []
+    fallback_actions = data.get("window_positions", []) if mode == "window" else data.get("screen_positions", [])
+    actions = data.get("actions") or fallback_actions
+    runnable_action_count = 0
     if mode == "window":
         titles = set(data.get("target_windows", []))
-        titles.update(p.get("win_title") for p in data.get("window_positions", []) if p.get("win_title"))
+        titles.update(p.get("win_title") for p in fallback_actions if p.get("win_title"))
         titles = sorted(titles)
         write_auto_log(log_path, f"waiting for windows={titles}")
         window_map = wait_for_windows(titles, target_wait_seconds, log_path)
@@ -785,35 +787,21 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             write_auto_log(log_path, f"matched window titles={list(window_map.keys())}")
 
 
-        for p in data.get("window_positions", []):
-            hwnd = window_map.get(p.get("win_title"))
-            if hwnd and is_position_action(p):
-                positions.append({
-                    "type": p.get("type", "click"),
-                    "x": p["x"],
-                    "y": p["y"],
-                    "button": p.get("button"),
-                    "delta": p.get("delta"),
-                    "delay": p.get("delay"),
-                    "hwnd": hwnd,
-                })
+        runnable_action_count = sum(
+            1
+            for action in actions
+            if is_position_action(action) and window_map.get(action.get("win_title"))
+        )
     else:
-        for p in data.get("screen_positions", []):
-            if is_position_action(p):
-                positions.append({
-                    "type": p.get("type", "click"),
-                    "x": p["x"],
-                    "y": p["y"],
-                    "button": p.get("button"),
-                    "delta": p.get("delta"),
-                    "delay": p.get("delay"),
-                })
+        runnable_action_count = sum(1 for action in actions if is_position_action(action))
 
-    if not positions:
+    if not runnable_action_count:
         write_auto_log(log_path, "no runnable positions resolved; exit=3")
         return 3
 
-    write_auto_log(log_path, f"resolved runnable positions={len(positions)}")
+    if not data.get("actions"):
+        write_auto_log(log_path, "actions list missing; using legacy mode position list")
+    write_auto_log(log_path, f"resolved runnable positions={runnable_action_count}")
 
     deadline = None
     if loop_enabled and timeout_seconds > 0:
@@ -825,7 +813,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         round_clicks = 0
         round_waits = 0
 
-        for action in data.get("actions", []):
+        for action in actions:
             if deadline is not None and time.monotonic() >= deadline:
                 write_auto_log(log_path, "loop timeout reached before action; exit=0")
                 return 0
