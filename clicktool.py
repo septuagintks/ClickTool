@@ -17,7 +17,6 @@ import win32con
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-WH_MOUSE_LL = 14
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -27,8 +26,6 @@ WM_MBUTTONUP = 0x0208
 WM_MOUSEWHEEL = 0x020A
 WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
-WM_QUIT = 0x0012
-HC_ACTION = 0
 VK_ESCAPE = 0x1B
 
 
@@ -53,47 +50,6 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
-class MSLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("pt", POINT),
-        ("mouseData", ctypes.c_ulong),
-        ("flags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.c_void_p),
-    ]
-
-
-LowLevelMouseProc = ctypes.WINFUNCTYPE(
-    wintypes.LPARAM, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
-)
-
-user32.SetWindowsHookExW.restype = wintypes.HHOOK
-user32.SetWindowsHookExW.argtypes = [
-    ctypes.c_int,
-    LowLevelMouseProc,
-    wintypes.HINSTANCE,
-    wintypes.DWORD,
-]
-user32.CallNextHookEx.restype = wintypes.LPARAM
-user32.CallNextHookEx.argtypes = [
-    wintypes.HHOOK,
-    ctypes.c_int,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
-]
-user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
-user32.GetMessageW.argtypes = [
-    ctypes.POINTER(wintypes.MSG),
-    wintypes.HWND,
-    wintypes.UINT,
-    wintypes.UINT,
-]
-user32.PostThreadMessageW.argtypes = [
-    wintypes.DWORD,
-    wintypes.UINT,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
-]
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
@@ -365,8 +321,18 @@ def write_script_file(file_path: str, data: dict) -> None:
     directory = os.path.dirname(file_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    temp_path = file_path + ".tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(temp_path, file_path)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise e
 
 
 def normalize_script_data(data: dict) -> dict:
@@ -1584,18 +1550,18 @@ class ClickerApp:
     def add_current_dot(self) -> None:
         if self._active_mode == "window":
             self.notebook.select(1)
-            self.add_window_dot()
+            self.add_window_dot(at_cursor=True)
         else:
             self.notebook.select(0)
-            self.add_screen_dot()
+            self.add_screen_dot(at_cursor=True)
 
     def add_current_wheel(self) -> None:
         if self._active_mode == "window":
             self.notebook.select(1)
-            self.add_window_wheel()
+            self.add_window_wheel(at_cursor=True)
         else:
             self.notebook.select(0)
-            self.add_screen_wheel()
+            self.add_screen_wheel(at_cursor=True)
 
     def add_current_wait(self) -> None:
         if self._active_mode == "window":
@@ -1822,11 +1788,18 @@ class ClickerApp:
         self._refresh_window_list()
         self._refresh_window_pt_list()
 
-    def add_screen_dot(self) -> None:
-        """Create a new draggable dot at the center of the screen."""
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        x, y = screen_w // 2, screen_h // 2
+    def add_screen_dot(self, at_cursor: bool = False) -> None:
+        """Create a new draggable dot at the center of the screen or at the cursor."""
+        x, y = None, None
+        if at_cursor:
+            try:
+                x, y = win32api.GetCursorPos()
+            except Exception:
+                pass
+        if x is None or y is None:
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x, y = screen_w // 2, screen_h // 2
         
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
@@ -1846,13 +1819,20 @@ class ClickerApp:
         self.screen_tree.selection_set(last_item)
         self.screen_tree.see(last_item)
         self._on_screen_list_select()
-        self.status_var.set(f"Added screen dot at center.")
+        self.status_var.set(f"Added screen dot at ({x}, {y}).")
 
-    def add_screen_wheel(self) -> None:
-        """Create a wheel action at the center of the screen."""
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        x, y = screen_w // 2, screen_h // 2
+    def add_screen_wheel(self, at_cursor: bool = False) -> None:
+        """Create a wheel action at the center of the screen or at the cursor."""
+        x, y = None, None
+        if at_cursor:
+            try:
+                x, y = win32api.GetCursorPos()
+            except Exception:
+                pass
+        if x is None or y is None:
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)
         dot = DraggableDot(
@@ -1878,7 +1858,7 @@ class ClickerApp:
         self.screen_tree.selection_set(last_item)
         self.screen_tree.see(last_item)
         self._on_screen_list_select()
-        self.status_var.set("Added screen wheel action at center.")
+        self.status_var.set(f"Added screen wheel action at ({x}, {y}).")
 
     def add_screen_wait(self) -> None:
         """Add a wait item to the screen list."""
@@ -2000,7 +1980,7 @@ class ClickerApp:
         self._screen_positions.clear()
         self._refresh_screen_list()
 
-    def add_window_dot(self) -> None:
+    def add_window_dot(self, at_cursor: bool = False) -> None:
         """Create a new draggable dot for the selected window."""
         sel_win = self.target_win_list.curselection()
         if not sel_win:
@@ -2022,12 +2002,25 @@ class ClickerApp:
             
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
-        rel_x, rel_y = win_w // 2, win_h // 2
-        if self.pure_background_window_click_var.get():
-            bounds = get_client_bounds_in_window(hwnd)
-            if bounds:
-                rel_x = (bounds[0] + bounds[2]) // 2
-                rel_y = (bounds[1] + bounds[3]) // 2
+        
+        rel_x, rel_y = None, None
+        if at_cursor:
+            try:
+                cx, cy = win32api.GetCursorPos()
+                rx = cx - rect[0]
+                ry = cy - rect[1]
+                if 0 <= rx <= win_w and 0 <= ry <= win_h:
+                    rel_x, rel_y = rx, ry
+            except Exception:
+                pass
+                
+        if rel_x is None or rel_y is None:
+            rel_x, rel_y = win_w // 2, win_h // 2
+            if self.pure_background_window_click_var.get():
+                bounds = get_client_bounds_in_window(hwnd)
+                if bounds:
+                    rel_x = (bounds[0] + bounds[2]) // 2
+                    rel_y = (bounds[1] + bounds[3]) // 2
 
         index = len(self._window_positions)
         dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
@@ -2049,9 +2042,9 @@ class ClickerApp:
         self.window_pt_tree.selection_set(last_item)
         self.window_pt_tree.see(last_item)
         
-        self.status_var.set(f"Added window dot for '{win_data['title']}'.")
+        self.status_var.set(f"Added window dot for '{win_data['title']}' at ({rel_x}, {rel_y}).")
 
-    def add_window_wheel(self) -> None:
+    def add_window_wheel(self, at_cursor: bool = False) -> None:
         """Create a wheel action for the selected window."""
         sel_win = self.target_win_list.curselection()
         if not sel_win:
@@ -2073,12 +2066,25 @@ class ClickerApp:
 
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
-        rel_x, rel_y = win_w // 2, win_h // 2
-        if self.pure_background_window_click_var.get():
-            bounds = get_client_bounds_in_window(hwnd)
-            if bounds:
-                rel_x = (bounds[0] + bounds[2]) // 2
-                rel_y = (bounds[1] + bounds[3]) // 2
+        
+        rel_x, rel_y = None, None
+        if at_cursor:
+            try:
+                cx, cy = win32api.GetCursorPos()
+                rx = cx - rect[0]
+                ry = cy - rect[1]
+                if 0 <= rx <= win_w and 0 <= ry <= win_h:
+                    rel_x, rel_y = rx, ry
+            except Exception:
+                pass
+                
+        if rel_x is None or rel_y is None:
+            rel_x, rel_y = win_w // 2, win_h // 2
+            if self.pure_background_window_click_var.get():
+                bounds = get_client_bounds_in_window(hwnd)
+                if bounds:
+                    rel_x = (bounds[0] + bounds[2]) // 2
+                    rel_y = (bounds[1] + bounds[3]) // 2
 
         index = len(self._window_positions)
         dot = DraggableDot(
@@ -2109,7 +2115,7 @@ class ClickerApp:
         self.window_pt_tree.see(last_item)
         self._on_window_list_select()
 
-        self.status_var.set(f"Added window wheel action for '{win_data['title']}'.")
+        self.status_var.set(f"Added window wheel action for '{win_data['title']}' at ({rel_x}, {rel_y}).")
 
     def add_window_wait(self) -> None:
         """Add a wait item to the window list."""
@@ -2653,14 +2659,16 @@ class ClickerApp:
         self._set_dots_visible(False)
         
         pure_background = self.pure_background_window_click_var.get()
+        loop_enabled = self.loop_var.get()
         self._click_thread = threading.Thread(
-            target=self._click_loop, args=(global_interval, actions_snapshot, mode, pure_background), daemon=True
+            target=self._click_loop, args=(global_interval, actions_snapshot, mode, pure_background, loop_enabled), daemon=True
         )
         self._click_thread.start()
         
         self.start_button.config(state="disabled")
         self.stop_button.config(state="normal")
-        self._escape_thread = threading.Thread(target=self._watch_escape, daemon=True)
+        stop_hotkey = self.hotkey_vars["stop"].get()
+        self._escape_thread = threading.Thread(target=self._watch_escape, args=(stop_hotkey,), daemon=True)
         self._escape_thread.start()
         self.status_var.set("Looping clicks... Press Esc to stop.")
 
@@ -2678,8 +2686,7 @@ class ClickerApp:
                 if visible: p["dot"].deiconify()
                 else: p["dot"].withdraw()
 
-    def _watch_escape(self) -> None:
-        stop_hotkey = self.hotkey_vars["stop"].get()
+    def _watch_escape(self, stop_hotkey: str) -> None:
         while not self._stop_event.wait(0.03):
             if stop_hotkey:
                 if is_hotkey_pressed_globally(stop_hotkey):
@@ -2690,7 +2697,17 @@ class ClickerApp:
                     self._stop_event.set()
                     break
 
-    def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str, pure_background: bool) -> None:
+    def _update_hwnd_from_thread(self, title: str, hwnd: int) -> None:
+        for w in self._target_windows:
+            if w["title"] == title:
+                w["hwnd"] = hwnd
+        for p in self._window_positions:
+            if p.get("win_title") == title:
+                p["hwnd"] = hwnd
+                if is_position_action(p) and "dot" in p:
+                    p["dot"].hwnd = hwnd
+
+    def _click_loop(self, global_interval_ms: int, actions: list[dict], mode: str, pure_background: bool, loop_enabled: bool) -> None:
         while not self._stop_event.is_set():
             for action in actions:
                 if self._stop_event.is_set():
@@ -2710,14 +2727,7 @@ class ClickerApp:
                             if found_hwnd:
                                 hwnd = found_hwnd
                                 action["hwnd"] = hwnd
-                                for w in self._target_windows:
-                                    if w["title"] == title:
-                                        w["hwnd"] = hwnd
-                                for p in self._window_positions:
-                                    if p.get("win_title") == title:
-                                        p["hwnd"] = hwnd
-                                        if is_position_action(p) and "dot" in p:
-                                            p["dot"].hwnd = hwnd
+                                self.root.after(0, self._update_hwnd_from_thread, title, hwnd)
                         if hwnd and user32.IsWindow(hwnd):
                             perform_window_mouse_action(hwnd, action, pure_background)
                     else:
@@ -2736,7 +2746,7 @@ class ClickerApp:
                         break
             
             # If loop is disabled, stop after one full pass
-            if not self.loop_var.get():
+            if not loop_enabled:
                 break
                     
         self.root.after(0, self._on_loop_exit)
