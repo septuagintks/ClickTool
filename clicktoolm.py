@@ -14,12 +14,9 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 # WinAPI Constants
-WH_MOUSE_LL = 14
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
-WM_QUIT = 0x0012
-HC_ACTION = 0
 VK_ESCAPE = 0x1B
 MK_LBUTTON = 0x0001
 
@@ -147,47 +144,6 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
-class MSLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("pt", POINT),
-        ("mouseData", ctypes.c_ulong),
-        ("flags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.c_void_p),
-    ]
-
-
-LowLevelMouseProc = ctypes.WINFUNCTYPE(
-    wintypes.LPARAM, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
-)
-
-user32.SetWindowsHookExW.restype = wintypes.HHOOK
-user32.SetWindowsHookExW.argtypes = [
-    ctypes.c_int,
-    LowLevelMouseProc,
-    wintypes.HINSTANCE,
-    wintypes.DWORD,
-]
-user32.CallNextHookEx.restype = wintypes.LPARAM
-user32.CallNextHookEx.argtypes = [
-    wintypes.HHOOK,
-    ctypes.c_int,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
-]
-user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
-user32.GetMessageW.argtypes = [
-    ctypes.POINTER(wintypes.MSG),
-    wintypes.HWND,
-    wintypes.UINT,
-    wintypes.UINT,
-]
-user32.PostThreadMessageW.argtypes = [
-    wintypes.DWORD,
-    wintypes.UINT,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
-]
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
@@ -425,8 +381,18 @@ def write_script_file(file_path: str, data: dict) -> None:
     directory = os.path.dirname(file_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    temp_path = file_path + ".tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(temp_path, file_path)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise e
 
 
 def list_visible_windows() -> list[tuple[int, str]]:
@@ -789,7 +755,20 @@ class ClickerApp:
         list_frame = ttk.Frame(frame)
         list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
         self.screen_list = tk.Listbox(
-            list_frame, height=9, width=56, activestyle="dotbox"
+            list_frame,
+            height=9,
+            width=56,
+            activestyle="dotbox",
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
         )
         self.screen_list.grid(row=0, column=0)
         self.screen_list.bind("<<ListboxSelect>>", self._on_screen_list_select)
@@ -835,7 +814,21 @@ class ClickerApp:
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.target_win_list = tk.Listbox(win_list_frame, height=12, width=28)
+        self.target_win_list = tk.Listbox(
+            win_list_frame,
+            height=12,
+            width=28,
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
+        )
         self.target_win_list.pack(side="left", fill="both", expand=True)
         
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
@@ -856,7 +849,21 @@ class ClickerApp:
         pt_list_frame = ttk.Frame(pt_frame)
         pt_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.window_pt_list = tk.Listbox(pt_list_frame, height=12, width=44)
+        self.window_pt_list = tk.Listbox(
+            pt_list_frame,
+            height=12,
+            width=44,
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
+        )
         self.window_pt_list.pack(side="left", fill="both", expand=True)
         self.window_pt_list.bind("<<ListboxSelect>>", self._on_window_list_select)
         
@@ -1049,7 +1056,19 @@ class ClickerApp:
         list_frame = ttk.Frame(dialog)
         list_frame.pack(fill="both", expand=True, padx=10)
         
-        lb = tk.Listbox(list_frame)
+        lb = tk.Listbox(
+            list_frame,
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
+        )
         lb.pack(side="left", fill="both", expand=True)
         
         scroll = ttk.Scrollbar(list_frame, orient="vertical", command=lb.yview)
@@ -1155,7 +1174,7 @@ class ClickerApp:
         self.screen_list.selection_set(index)
         self.screen_list.activate(index)
         self._on_screen_list_select()
-        self.status_var.set(f"Added screen dot {index+1} at center.")
+        self.status_var.set(f"Added screen dot at ({x}, {y}).")
 
     def _on_screen_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1286,7 +1305,7 @@ class ClickerApp:
         self.target_win_list.selection_set(win_idx)
         self.target_win_list.activate(win_idx)
         
-        self.status_var.set(f"Added window dot {index+1} for '{win_data['title']}'.")
+        self.status_var.set(f"Added window dot for '{win_data['title']}' at ({rel_x}, {rel_y}).")
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1512,7 +1531,7 @@ class ClickerApp:
             return
 
         self._stop_event.clear()
-        
+
         # Snapshot positions for the thread
         positions_snapshot = []
         for p in positions:
@@ -1523,13 +1542,15 @@ class ClickerApp:
             }
             if mode == "window":
                 snapshot["hwnd"] = p["hwnd"]
+                snapshot["win_title"] = p.get("win_title")
             positions_snapshot.append(snapshot)
-            
+
         # Hide dots while clicking to avoid blocking
         self._set_dots_visible(False)
-        
+
+        loop_enabled = self.loop_var.get()
         self._click_thread = threading.Thread(
-            target=self._click_loop, args=(global_interval, positions_snapshot, mode), daemon=True
+            target=self._click_loop, args=(global_interval, positions_snapshot, mode, loop_enabled), daemon=True
         )
         self._click_thread.start()
         
@@ -1571,13 +1592,23 @@ class ClickerApp:
                     self.root.after(0, self.start_clicking)
                     time.sleep(0.5)
 
-    def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str) -> None:
+    def _update_hwnd_from_thread(self, title: str, hwnd: int) -> None:
+        for w in self._target_windows:
+            if w["title"] == title:
+                w["hwnd"] = hwnd
+        for p in self._window_positions:
+            if p.get("win_title") == title:
+                p["hwnd"] = hwnd
+                if "dot" in p:
+                    p["dot"].hwnd = hwnd
+
+    def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str, loop_enabled: bool) -> None:
         global_interval_s = global_interval_ms / 1000.0
         while not self._stop_event.is_set():
             for pos in positions:
                 if self._stop_event.is_set():
                     break
-                
+
                 if mode == "window":
                     hwnd = pos["hwnd"]
                     if not hwnd or not user32.IsWindow(hwnd):
@@ -1585,18 +1616,12 @@ class ClickerApp:
                         title = pos.get("win_title")
                         found_hwnd = next((h for h, t in active_windows if t == title), None)
                         if not found_hwnd:
-                            found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                            found_hwnd = next((h for h, t in active_windows if title and title.lower() in t.lower()), None)
                         if found_hwnd:
                             hwnd = found_hwnd
                             pos["hwnd"] = hwnd
-                            for w in self._target_windows:
-                                if w["title"] == title:
-                                    w["hwnd"] = hwnd
-                            for p in self._window_positions:
-                                if p.get("win_title") == title:
-                                    p["hwnd"] = hwnd
-                                    if "dot" in p:
-                                        p["dot"].hwnd = hwnd
+                            if title:
+                                self.root.after(0, self._update_hwnd_from_thread, title, hwnd)
                     if hwnd and user32.IsWindow(hwnd):
                         rect = get_window_rect(hwnd)
                         if rect:
@@ -1609,14 +1634,14 @@ class ClickerApp:
                 # Determine wait time: per-step delay or global interval
                 delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
                 wait_s = delay_ms / 1000.0
-                
+
                 if wait_s > 0 and self._stop_event.wait(wait_s):
                     break
-            
+
             # If loop is disabled, stop after one full pass
-            if not self.loop_var.get():
+            if not loop_enabled:
                 break
-                    
+
         self.root.after(0, self._on_loop_exit)
 
     def _on_loop_exit(self) -> None:
