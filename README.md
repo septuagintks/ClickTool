@@ -70,6 +70,7 @@ Automation behavior:
 - **Compact Controls**: Run, import/export, loop, and interval controls share one bottom bar to leave more room for click lists. Action buttons are grouped by add/edit tasks instead of a single long row.
 - **Optimized Dialogs**: Window selection and auto configuration dialogs use more compact layouts.
 - **Bidirectional Selection**: Clicking a dot on the screen automatically selects its corresponding entry in the list.
+- **Smart Hotkey Placement**: Creating action points (Dot or Wheel) via global hotkeys automatically places them exactly at the current position of the mouse cursor. In Window Mode, if the cursor is within the targeted window bounds, it automatically calculates the coordinates relative to that window. (Directly clicking the GUI "Add" buttons still defaults to the screen/window center).
 ### General Features
 - **Loop Toggle**: Choose between continuous looping or a single execution of your click sequence.
 - **Script Management**: Export your entire setup (intervals, screen points, window targets, loop state) to a JSON file and import it later.
