@@ -1307,7 +1307,21 @@ class ClickerApp:
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
         
-        self.target_win_list = tk.Listbox(win_list_frame, height=12, width=28)
+        self.target_win_list = tk.Listbox(
+            win_list_frame,
+            height=12,
+            width=28,
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
+        )
         self.target_win_list.pack(side="left", fill="both", expand=True)
         
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
@@ -1703,7 +1717,19 @@ class ClickerApp:
         list_frame = ttk.Frame(dialog)
         list_frame.pack(fill="both", expand=True, padx=10)
         
-        lb = tk.Listbox(list_frame)
+        lb = tk.Listbox(
+            list_frame,
+            bg="white",
+            fg="#323130",
+            selectbackground="#deecf9",
+            selectforeground="#0078d7",
+            font=("Segoe UI", 9),
+            borderwidth=1,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d2d0ce",
+            highlightcolor="#0078d7"
+        )
         lb.pack(side="left", fill="both", expand=True)
         
         scroll = ttk.Scrollbar(list_frame, orient="vertical", command=lb.yview)
