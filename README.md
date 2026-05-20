@@ -29,10 +29,11 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 - **Cross-Window Sequencing**: Create sequences across multiple different windows.
 
 ### UI & UX Improvements
-- **Settings Tab**: Window-mode behavior is separated from click sequence editing.
+- **Settings Tab**: Window-mode notes, default Interval / Wait values, and shortcut customization are grouped here.
 - **Compact Controls**: Run controls share one bottom bar to leave more room for click lists. Action buttons are grouped by add/edit tasks.
 - **Optimized Dialogs**: Window selection dialogs use a tighter layout.
 - **Bidirectional Selection**: Clicking a dot on the screen automatically selects its corresponding entry in the list.
+- **Smart Hotkey Placement**: Creating action points (Dot or Wheel) via global hotkeys automatically places them exactly at the current position of the mouse cursor. In Window Mode, if the cursor is within the targeted window bounds, it automatically calculates the coordinates relative to that window. (Directly clicking the GUI "Add" buttons still defaults to the screen/window center.)
 - **Dot Hover Effects**: Dots visually highlight when the cursor hovers over them. Wheel-action dots are styled in purple to distinguish them from click dots.
 
 ### General Features
@@ -42,8 +43,8 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 - **Auto-refreshing Window List**: The "Add Window" dialog automatically updates the list of available windows.
 - **Custom Delays**: Set unique wait times for each individual click point.
 - **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling; standalone Wait items insert pauses between actions.
-- **Custom Hotkeys**: Configure Start/Stop keyboard shortcuts via the Settings tab (supports symbol keys like `Ctrl+.`).
-- **Global Hotkey Interception**: Start and stop sequences from any window without needing to focus ClickTool.
+- **Defaults & Shortcuts**: The Settings tab can change the default run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Wait, and Clear.
+- **Global Hotkey Interception**: Start, Stop, and add/clear actions can be triggered from any window without focusing ClickTool.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
 - **Log Rotation**: Auto-run logs are automatically rotated when they exceed 1 MB.
 

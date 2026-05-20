@@ -221,44 +221,128 @@ for c in "0123456789":
 
 DEFAULT_HOTKEYS = {
     "start": "F8",
-    "stop": "ESC",
+    "stop": "Esc",
+    "add_window": "Ctrl+Shift+W",
+    "add_dot": "Ctrl+D",
+    "add_wheel": "Ctrl+Shift+D",
+    "add_wait": "Ctrl+W",
+    "clear": "Ctrl+Delete",
 }
 
 HOTKEY_ACTIONS = (
-    ("start", "Start/Pause Sequence"),
-    ("stop", "Stop/Cancel Sequence"),
+    ("start", "Start"),
+    ("stop", "Stop"),
+    ("add_window", "Add Window"),
+    ("add_dot", "Add Dot"),
+    ("add_wheel", "Add Wheel"),
+    ("add_wait", "Add Wait"),
+    ("clear", "Clear"),
 )
+
+MODIFIER_STATE_BITS = {
+    "Shift": 0x0001,
+    "Ctrl": 0x0004,
+    "Alt": 0x0008,
+}
+MODIFIER_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R"}
+
 
 def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
     if not hotkey_str:
         return False
     parts = [p.strip().upper() for p in hotkey_str.split("+") if p.strip()]
-    for p in parts:
-        vk = VK_MAP.get(p)
-        if vk is None:
-            if len(p) == 1:
-                vk = ord(p)
-            else:
+    if not parts:
+        return False
+    modifiers_needed = {
+        "CTRL": 0x11,  # VK_CONTROL
+        "ALT": 0x12,   # VK_MENU
+        "SHIFT": 0x10, # VK_SHIFT
+    }
+    for mod_name, vk_code in modifiers_needed.items():
+        is_pressed = (user32.GetAsyncKeyState(vk_code) & 0x8000) != 0
+        if mod_name in parts:
+            if not is_pressed:
                 return False
-        if not (user32.GetAsyncKeyState(vk) & 0x8000):
+        else:
+            if is_pressed:
+                return False
+    main_keys = [p for p in parts if p not in modifiers_needed]
+    if not main_keys:
+        return False
+    main_key_str = main_keys[0]
+    vk = VK_MAP.get(main_key_str)
+    if vk is None:
+        if len(main_key_str) == 1:
+            vk = ord(main_key_str)
+        else:
             return False
-    return True
+    return (user32.GetAsyncKeyState(vk) & 0x8000) != 0
+
+
+def canonical_key_name(key: str) -> str:
+    if len(key) == 1:
+        return key.upper()
+    if key.lower().startswith("f") and key[1:].isdigit():
+        return key.upper()
+    return key[:1].upper() + key[1:]
+
 
 def normalize_hotkey_text(value) -> str:
-    if not value: return ""
-    return "+".join(p.strip().upper() for p in str(value).split("+") if p.strip())
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.strip("<>")
+    text = text.replace("-", "+")
+    parts = [part.strip() for part in text.split("+") if part.strip()]
+    if not parts:
+        return ""
+
+    aliases = {
+        "control": "Ctrl",
+        "ctrl": "Ctrl",
+        "shift": "Shift",
+        "alt": "Alt",
+        "option": "Alt",
+        "escape": "Esc",
+        "esc": "Esc",
+        "return": "Enter",
+        "enter": "Enter",
+        "delete": "Delete",
+        "del": "Delete",
+        "space": "Space",
+        "tab": "Tab",
+    }
+
+    modifiers: list[str] = []
+    key = ""
+    for part in parts:
+        mapped = aliases.get(part.lower())
+        if mapped in MODIFIER_STATE_BITS:
+            if mapped not in modifiers:
+                modifiers.append(mapped)
+        else:
+            key = mapped or canonical_key_name(part)
+
+    if not key:
+        return ""
+    ordered_modifiers = [name for name in ("Ctrl", "Alt", "Shift") if name in modifiers]
+    return "+".join([*ordered_modifiers, key])
+
 
 def hotkey_from_event(event) -> str:
-    parts = []
-    if event.state & 4: parts.append("CTRL")
-    if event.state & 1: parts.append("SHIFT")
-    if event.state & 131072: parts.append("ALT")
-    key = event.keysym.upper()
-    if key in ("CONTROL_L", "CONTROL_R", "SHIFT_L", "SHIFT_R", "ALT_L", "ALT_R"):
-        pass
-    else:
-        parts.append(key)
-    return "+".join(parts)
+    if event.keysym in MODIFIER_KEYS:
+        return ""
+    key = {
+        "Escape": "Esc",
+        "Return": "Enter",
+        "space": "Space",
+    }.get(event.keysym, canonical_key_name(event.keysym))
+    modifiers = [
+        name
+        for name in ("Ctrl", "Alt", "Shift")
+        if event.state & MODIFIER_STATE_BITS[name]
+    ]
+    return "+".join([*modifiers, key])
 
 DOT_SIZE = 40
 APP_NAME = "ClickTool"
@@ -267,6 +351,8 @@ AUTO_LOG_DIRNAME = "logs"
 DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
 DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
+DEFAULT_INTERVAL_MS = 500
+DEFAULT_WAIT_MS = 500
 WHEEL_DELTA = 120
 XBUTTON1 = 0x0001
 XBUTTON2 = 0x0002
@@ -464,6 +550,9 @@ def normalize_script_data(data: dict) -> dict:
         data["mode"] = "window" if data.get("window_positions") else "screen"
     settings = data.setdefault("settings", {})
     settings["window_client_area_only"] = True
+    settings["default_wait_ms"] = coerce_non_negative_int(
+        settings.get("default_wait_ms"), DEFAULT_WAIT_MS
+    )
     auto = data.setdefault("auto", {})
     auto["loop_timeout_seconds"] = coerce_non_negative_int(
         auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
@@ -736,7 +825,8 @@ class ClickerApp:
         self.root.resizable(True, True)
         self.root.minsize(560, 430)
 
-        self.interval_var = tk.StringVar(value="500")
+        self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
+        self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
         self.step_delay_var = tk.StringVar()
         self.custom_delay_var = tk.StringVar()
         self.mouse_button_var = tk.StringVar(value="left")
@@ -875,10 +965,19 @@ class ClickerApp:
             foreground="#555555",
             wraplength=500,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        
+
+        defaults_frame = ttk.LabelFrame(frame, text="Defaults", padding=10)
+        defaults_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        defaults_frame.columnconfigure(1, weight=1)
+        ttk.Label(defaults_frame, text="Interval (ms)").grid(row=0, column=0, sticky="w")
+        ttk.Entry(defaults_frame, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 18))
+        ttk.Label(defaults_frame, text="Wait item (ms)").grid(row=0, column=2, sticky="w")
+        ttk.Entry(defaults_frame, textvariable=self.default_wait_var, width=10).grid(row=0, column=3, sticky="w", padx=(8, 0))
+        ttk.Button(defaults_frame, text="Apply", command=self.apply_defaults).grid(row=0, column=4, sticky="e", padx=(16, 0))
+
         hotkey_frame = ttk.LabelFrame(frame, text="Shortcuts", padding=10)
-        hotkey_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-        for col in range(4):
+        hotkey_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        for col in (1, 3):
             hotkey_frame.columnconfigure(col, weight=1)
 
         for index, (action, label) in enumerate(HOTKEY_ACTIONS):
@@ -886,33 +985,30 @@ class ClickerApp:
             col = (index % 2) * 2
             ttk.Label(hotkey_frame, text=label).grid(row=row, column=col, sticky="w", pady=2, padx=(0, 6))
             ttk.Entry(hotkey_frame, textvariable=self.hotkey_vars[action], width=18).grid(
-                row=row, column=col + 1, sticky="ew", pady=2, padx=(0, 6)
-            )
-            self.root.bind(
-                f"<FocusIn>",
-                lambda e, a=action: self._bind_hotkey_capture(a) if str(e.widget) == str(self.hotkey_vars[a]._root) else None,
+                row=row,
+                column=col + 1,
+                sticky="ew",
+                pady=2,
+                padx=(0, 14 if col == 0 else 0),
             )
 
         ttk.Button(hotkey_frame, text="Apply Shortcuts", command=self._apply_hotkeys).grid(
             row=(len(HOTKEY_ACTIONS) + 1) // 2,
             column=0,
             columnspan=2,
-            sticky="e",
-            pady=(12, 0),
-            padx=(0, 6),
+            sticky="w",
+            pady=(8, 0),
         )
         ttk.Button(hotkey_frame, text="Reset", command=self.reset_hotkeys).grid(
             row=(len(HOTKEY_ACTIONS) + 1) // 2,
             column=2,
-            columnspan=2,
             sticky="w",
-            pady=(12, 0),
+            pady=(8, 0),
         )
         ttk.Label(
             hotkey_frame,
-            text="Press keys to capture. Delete text to disable.",
-            font=("", 8),
-            foreground="#666666",
+            text="Examples: Ctrl+D, Ctrl+Shift+W, Esc. Leave blank to disable an action.",
+            foreground="#555555",
         ).grid(row=((len(HOTKEY_ACTIONS) + 1) // 2) + 1, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     def _build_screen_mode_ui(self, frame) -> None:
@@ -1423,11 +1519,20 @@ class ClickerApp:
             self._refresh_window_pt_list()
             self.window_pt_list.selection_set(index)
 
-    def add_screen_dot(self) -> None:
-        """Create a new draggable dot at the center of the screen."""
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        x, y = screen_w // 2, screen_h // 2
+    def add_screen_dot(self, at_cursor: bool = False) -> None:
+        """Create a new draggable dot at the cursor or screen center."""
+        x, y = None, None
+        if at_cursor:
+            try:
+                pt = POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    x, y = pt.x, pt.y
+            except Exception:
+                pass
+        if x is None or y is None:
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
@@ -1449,11 +1554,20 @@ class ClickerApp:
         self._on_screen_list_select()
         self.status_var.set(f"Added screen dot at ({x}, {y}).")
 
-    def add_screen_wheel(self) -> None:
-        """Create a wheel action at the center of the screen."""
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        x, y = screen_w // 2, screen_h // 2
+    def add_screen_wheel(self, at_cursor: bool = False) -> None:
+        """Create a wheel action at the cursor or screen center."""
+        x, y = None, None
+        if at_cursor:
+            try:
+                pt = POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    x, y = pt.x, pt.y
+            except Exception:
+                pass
+        if x is None or y is None:
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
@@ -1477,13 +1591,9 @@ class ClickerApp:
 
     def add_screen_wait(self) -> None:
         """Add a wait item to the screen list."""
-        wait_ms = 500
-        try:
-            interval = int(self.interval_var.get())
-            if interval > 0:
-                wait_ms = interval
-        except (TypeError, ValueError):
-            pass
+        wait_ms = self._get_default_wait_ms()
+        if wait_ms is None:
+            return
         self._screen_positions.append({
             "type": "wait",
             "ms": wait_ms,
@@ -1595,7 +1705,7 @@ class ClickerApp:
         # The append fast-path is no longer used — wheel/wait reorder dot numbering.
         self._refresh_screen_list()
 
-    def add_window_dot(self) -> None:
+    def add_window_dot(self, at_cursor: bool = False) -> None:
         """Create a new draggable dot for the selected window."""
         sel_win = self.target_win_list.curselection()
         if not sel_win:
@@ -1615,14 +1725,30 @@ class ClickerApp:
             messagebox.showerror("Error", "Could not get window position.")
             return
 
-        # Place dot at center of client area (client-area only in minified)
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
-        rel_x, rel_y = win_w // 2, win_h // 2
-        bounds = get_client_bounds_in_window(hwnd)
-        if bounds:
-            rel_x = (bounds[0] + bounds[2]) // 2
-            rel_y = (bounds[1] + bounds[3]) // 2
+
+        rel_x, rel_y = None, None
+        if at_cursor:
+            try:
+                pt = POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    rx = pt.x - rect[0]
+                    ry = pt.y - rect[1]
+                    if 0 <= rx <= win_w and 0 <= ry <= win_h:
+                        rel_x, rel_y = rx, ry
+            except Exception:
+                pass
+
+        if rel_x is None or rel_y is None:
+            rel_x, rel_y = win_w // 2, win_h // 2
+            bounds = get_client_bounds_in_window(hwnd)
+            if bounds:
+                rel_x = (bounds[0] + bounds[2]) // 2
+                rel_y = (bounds[1] + bounds[3]) // 2
+
+        # Always clamp to client area in minified (client-area-only)
+        rel_x, rel_y = clamp_window_position(hwnd, rel_x, rel_y)
 
         index = len(self._window_positions)
         dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
@@ -1650,7 +1776,7 @@ class ClickerApp:
 
         self.status_var.set(f"Added window dot for '{win_data['title']}' at ({rel_x}, {rel_y}).")
 
-    def add_window_wheel(self) -> None:
+    def add_window_wheel(self, at_cursor: bool = False) -> None:
         """Create a wheel action for the selected window."""
         sel_win = self.target_win_list.curselection()
         if not sel_win:
@@ -1672,11 +1798,27 @@ class ClickerApp:
 
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
-        rel_x, rel_y = win_w // 2, win_h // 2
-        bounds = get_client_bounds_in_window(hwnd)
-        if bounds:
-            rel_x = (bounds[0] + bounds[2]) // 2
-            rel_y = (bounds[1] + bounds[3]) // 2
+
+        rel_x, rel_y = None, None
+        if at_cursor:
+            try:
+                pt = POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    rx = pt.x - rect[0]
+                    ry = pt.y - rect[1]
+                    if 0 <= rx <= win_w and 0 <= ry <= win_h:
+                        rel_x, rel_y = rx, ry
+            except Exception:
+                pass
+
+        if rel_x is None or rel_y is None:
+            rel_x, rel_y = win_w // 2, win_h // 2
+            bounds = get_client_bounds_in_window(hwnd)
+            if bounds:
+                rel_x = (bounds[0] + bounds[2]) // 2
+                rel_y = (bounds[1] + bounds[3]) // 2
+
+        rel_x, rel_y = clamp_window_position(hwnd, rel_x, rel_y)
 
         index = len(self._window_positions)
         dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
@@ -1705,13 +1847,9 @@ class ClickerApp:
 
     def add_window_wait(self) -> None:
         """Add a wait item to the window list."""
-        wait_ms = 500
-        try:
-            interval = int(self.interval_var.get())
-            if interval > 0:
-                wait_ms = interval
-        except (TypeError, ValueError):
-            pass
+        wait_ms = self._get_default_wait_ms()
+        if wait_ms is None:
+            return
         self._window_positions.append({
             "type": "wait",
             "ms": wait_ms,
@@ -1911,13 +2049,38 @@ class ClickerApp:
             self.window_pt_list.selection_set(index)
         self.status_var.set(f"Updated item {index+1}.")
 
+    def apply_defaults(self) -> None:
+        try:
+            interval_ms = int(self.interval_var.get().strip())
+            wait_ms = int(self.default_wait_var.get().strip())
+            if interval_ms < 0 or wait_ms < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Invalid Defaults", "Enter non-negative whole numbers for interval and wait.")
+            return
+
+        self.interval_var.set(str(interval_ms))
+        self.default_wait_var.set(str(wait_ms))
+        self.status_var.set("Defaults updated.")
+
+    def _get_default_wait_ms(self) -> int | None:
+        try:
+            wait_ms = int(self.default_wait_var.get().strip())
+            if wait_ms < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Invalid Wait", "Enter a non-negative whole number for the default wait.")
+            return None
+        self.default_wait_var.set(str(wait_ms))
+        return wait_ms
+
     def reset_hotkeys(self) -> None:
         for action, default in DEFAULT_HOTKEYS.items():
             self.hotkey_vars[action].set(default)
         self._apply_hotkeys()
 
     def _apply_hotkeys(self, show_status: bool = True) -> bool:
-        seen = {}
+        seen: dict[str, str] = {}
         hotkey_map: dict[str, str] = {}
         for action, label in HOTKEY_ACTIONS:
             hotkey = normalize_hotkey_text(self.hotkey_vars[action].get())
@@ -1929,25 +2092,11 @@ class ClickerApp:
                 return False
             seen[hotkey] = label
             hotkey_map[hotkey] = action
-            
+
         self._hotkey_map = hotkey_map
         if show_status:
-            self.status_var.set("Shortcuts applied successfully.")
+            self.status_var.set("Shortcuts updated.")
         return True
-
-    def _bind_hotkey_capture(self, action: str):
-        def capture(e):
-            if e.keysym == "BackSpace":
-                self.hotkey_vars[action].set("")
-                return "break"
-            hk = hotkey_from_event(e)
-            if hk and not hk in ("CTRL", "SHIFT", "ALT"):
-                self.hotkey_vars[action].set(hk)
-                return "break"
-            return None
-            
-        entry = self.hotkey_vars[action]._root.nametowidget(self.root.focus_get())
-        entry.bind("<KeyPress>", capture, add="+")
 
     def _on_key_press(self, event) -> str | None:
         hotkey = hotkey_from_event(event)
@@ -1960,14 +2109,53 @@ class ClickerApp:
 
     def _handle_hotkey_action(self, action: str) -> bool:
         if action == "start":
-            if not self._click_thread or not self._click_thread.is_alive():
-                self.root.after(0, self.start_clicking)
-            return True
+            self.start_clicking()
         elif action == "stop":
-            if self._click_thread and self._click_thread.is_alive():
-                self.root.after(0, self.stop_clicking)
-            return True
-        return False
+            self.stop_clicking()
+        elif action == "add_window":
+            self.notebook.select(1)
+            self.add_target_window()
+        elif action == "add_dot":
+            self.add_current_dot()
+        elif action == "add_wheel":
+            self.add_current_wheel()
+        elif action == "add_wait":
+            self.add_current_wait()
+        elif action == "clear":
+            self.clear_current_positions()
+        else:
+            return False
+        return True
+
+    def add_current_dot(self) -> None:
+        if self._active_mode == "window":
+            self.notebook.select(1)
+            self.add_window_dot(at_cursor=True)
+        else:
+            self.notebook.select(0)
+            self.add_screen_dot(at_cursor=True)
+
+    def add_current_wheel(self) -> None:
+        if self._active_mode == "window":
+            self.notebook.select(1)
+            self.add_window_wheel(at_cursor=True)
+        else:
+            self.notebook.select(0)
+            self.add_screen_wheel(at_cursor=True)
+
+    def add_current_wait(self) -> None:
+        if self._active_mode == "window":
+            self.notebook.select(1)
+            self.add_window_wait()
+        else:
+            self.notebook.select(0)
+            self.add_screen_wait()
+
+    def clear_current_positions(self) -> None:
+        if self._active_mode == "window":
+            self.clear_window_positions()
+        else:
+            self.clear_screen_positions()
 
     def start_clicking(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
@@ -2074,21 +2262,32 @@ class ClickerApp:
             else: p["dot"].withdraw()
 
     def _watch_global_hotkeys(self) -> None:
+        last_fired: dict[str, float] = {}
+        debounce_seconds = 0.4
         while True:
             time.sleep(0.03)
             try:
-                stop_hk = self.hotkey_vars["stop"].get()
-                start_hk = self.hotkey_vars["start"].get()
+                hotkey_map = dict(self._hotkey_map)
             except Exception:
                 continue
 
-            if stop_hk and is_hotkey_pressed_globally(stop_hk):
-                if self._click_thread and self._click_thread.is_alive():
-                    self._stop_event.set()
-            elif start_hk and is_hotkey_pressed_globally(start_hk):
-                if not self._click_thread or not self._click_thread.is_alive():
-                    self.root.after(0, self.start_clicking)
-                    time.sleep(0.5)
+            now = time.monotonic()
+            for hotkey, action in hotkey_map.items():
+                if not is_hotkey_pressed_globally(hotkey):
+                    continue
+                if now - last_fired.get(action, 0.0) < debounce_seconds:
+                    continue
+                last_fired[action] = now
+
+                if action == "stop":
+                    if self._click_thread and self._click_thread.is_alive():
+                        self._stop_event.set()
+                elif action == "start":
+                    if not self._click_thread or not self._click_thread.is_alive():
+                        self.root.after(0, self.start_clicking)
+                else:
+                    self.root.after(0, self._handle_hotkey_action, action)
+                break
 
     def _update_hwnd_from_thread(self, title: str, hwnd: int) -> None:
         for w in self._target_windows:
