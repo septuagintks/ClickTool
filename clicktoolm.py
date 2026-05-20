@@ -113,11 +113,6 @@ CWP_SKIPINVISIBLE = 0x0001
 def makelong(low, high):
     return (low & 0xFFFF) | ((high & 0xFFFF) << 16)
 
-def send_mouse_click(x, y, button="left"):
-    """Perform a hardware-level click using SendInput. Backward-compatible left-click default."""
-    perform_screen_mouse_action({"type": "click", "x": x, "y": y, "button": button})
-
-
 def perform_screen_mouse_action(action: dict) -> bool:
     """Perform a screen-space click or wheel action via SendInput."""
     action_type = action.get("type", "click")
@@ -171,10 +166,6 @@ def enable_dpi_awareness() -> None:
         ctypes.windll.shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
     except (AttributeError, OSError):
         pass
-
-
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -387,14 +378,6 @@ BUTTON_INPUT_MAP = {
     "x1": (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON1),
     "x2": (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON2),
 }
-
-class RECT(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
 
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
 user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
@@ -2408,10 +2391,6 @@ class ClickerApp:
         self.start_button.config(state="normal")
         self.stop_button.config(state="disabled")
         self.status_var.set("Stopped")
-
-    def _click_at(self, x: int, y: int) -> None:
-        """Move and left-click using SendInput. Backward-compatible wrapper."""
-        send_mouse_click(x, y)
 
     def _serialize_action(self, action: dict, include_window: bool = False) -> dict:
         action_type = action.get("type", "click")

@@ -11,6 +11,38 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
     python clicktoolm.py
     ```
 
+### Task Scheduler Automation
+
+Use the GUI **Save Auto** button to save the startup configuration first. The app stores it at:
+
+```text
+%LOCALAPPDATA%\ClickTool\auto_config.json
+```
+
+Then configure Windows Task Scheduler to start the packaged executable with:
+
+```bash
+ClickTool.exe --auto --silent
+```
+
+For script testing, the same automation path can be started with:
+
+```bash
+python clicktoolm.py --auto --silent
+```
+
+Pass `--config <path>` to override the default config location.
+
+Automation behavior:
+- Reads the saved auto config.
+- Runs without opening the Tkinter UI.
+- Allows only one Click Tool instance at a time.
+- Waits for configured target windows before clicking in Window Mode.
+- Self-heals window targets by re-resolving by title (exact match, then case-insensitive substring) if a HWND becomes invalid mid-run.
+- Exits automatically when the saved run finishes.
+- If the saved config has **Loop** enabled, automation stops at the first reached safety limit: default `60` seconds or `3` completed rounds.
+- Auto-run logs are written next to the config and rotated when they exceed 1 MB.
+
 ## Features
 
 ### 1. Screen Mode
