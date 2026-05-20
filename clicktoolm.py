@@ -183,6 +183,11 @@ user32.GetAsyncKeyState.restype = ctypes.c_short
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.GetLastError.restype = wintypes.DWORD
+kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 VK_MAP = {
     "ESC": 0x1B,
@@ -353,6 +358,7 @@ DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
 DEFAULT_INTERVAL_MS = 500
 DEFAULT_WAIT_MS = 500
+ERROR_ALREADY_EXISTS = 183
 WHEEL_DELTA = 120
 XBUTTON1 = 0x0001
 XBUTTON2 = 0x0002
@@ -598,6 +604,42 @@ def write_script_file(file_path: str, data: dict) -> None:
         raise e
 
 
+def acquire_single_instance_mutex() -> int | None:
+    mutex_name = f"Local\\{APP_NAME}SingleInstance"
+    handle = kernel32.CreateMutexW(None, True, mutex_name)
+    if not handle:
+        return None
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return None
+    return handle
+
+
+def release_single_instance_mutex(handle: int | None) -> None:
+    if handle:
+        kernel32.ReleaseMutex(handle)
+        kernel32.CloseHandle(handle)
+
+
+def sleep_until_deadline(seconds: float, deadline: float | None) -> None:
+    if seconds <= 0:
+        return
+    if deadline is None:
+        time.sleep(seconds)
+        return
+
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        time.sleep(min(seconds, remaining))
+
+
+def show_already_running_message() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Already Running", "Click Tool is already running.")
+    root.destroy()
+
+
 def list_visible_windows() -> list[tuple[int, str]]:
     windows: list[tuple[int, str]] = []
 
@@ -823,7 +865,7 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
-        self.root.minsize(560, 430)
+        self.root.minsize(680, 520)
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
@@ -832,6 +874,8 @@ class ClickerApp:
         self.mouse_button_var = tk.StringVar(value="left")
         self.loop_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
+        self.auto_loop_timeout_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS))
+        self.auto_loop_max_rounds_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_MAX_ROUNDS))
         self._active_mode = "screen"
         self._button_controls: list[tk.Widget] = []
         
@@ -937,21 +981,26 @@ class ClickerApp:
         # Global Run controls and Status
         bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
         bottom_frame.pack(fill="x")
-        bottom_frame.columnconfigure(6, weight=1)
+        bottom_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(bottom_frame, text="Interval").grid(row=0, column=0, sticky="w")
-        ttk.Entry(bottom_frame, textvariable=self.interval_var, width=8).grid(row=0, column=1, padx=(4, 8), sticky="w")
-        ttk.Checkbutton(bottom_frame, text="Loop", variable=self.loop_var).grid(row=0, column=2, padx=(0, 8))
-        self.start_button = ttk.Button(bottom_frame, text="Start", command=self.start_clicking, width=8, style="Accent.TButton")
-        self.start_button.grid(row=0, column=3, padx=(0, 4))
-        self.stop_button = ttk.Button(bottom_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
-        self.stop_button.grid(row=0, column=4, padx=(0, 8))
-        ttk.Button(bottom_frame, text="Import", command=self.import_script).grid(row=0, column=5, padx=(0, 4))
-        ttk.Button(bottom_frame, text="Export", command=self.export_script).grid(row=0, column=6, sticky="w", padx=(0, 4))
-        ttk.Button(bottom_frame, text="Save Auto", command=self.save_current_to_auto).grid(row=0, column=7)
+        run_frame = ttk.Frame(bottom_frame)
+        run_frame.grid(row=0, column=0, sticky="w")
+        ttk.Label(run_frame, text="Interval").pack(side="left")
+        ttk.Entry(run_frame, textvariable=self.interval_var, width=8).pack(side="left", padx=(4, 8))
+        ttk.Checkbutton(run_frame, text="Loop", variable=self.loop_var).pack(side="left", padx=(0, 8))
+        self.start_button = ttk.Button(run_frame, text="Start", command=self.start_clicking, width=8, style="Accent.TButton")
+        self.start_button.pack(side="left", padx=(0, 4))
+        self.stop_button = ttk.Button(run_frame, text="Stop", command=self.stop_clicking, state="disabled", width=8)
+        self.stop_button.pack(side="left")
+
+        script_frame = ttk.Frame(bottom_frame)
+        script_frame.grid(row=0, column=2, sticky="e")
+        ttk.Button(script_frame, text="Import", command=self.import_script).pack(side="left", padx=(0, 4))
+        ttk.Button(script_frame, text="Export", command=self.export_script).pack(side="left", padx=(0, 4))
+        ttk.Button(script_frame, text="Auto Config", command=self.open_auto_config_dialog).pack(side="left")
 
         ttk.Label(bottom_frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
-            row=1, column=0, columnspan=8, sticky="w", pady=(6, 0)
+            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
         )
 
     def _build_settings_ui(self, frame) -> None:
@@ -1012,6 +1061,8 @@ class ClickerApp:
         ).grid(row=((len(HOTKEY_ACTIONS) + 1) // 2) + 1, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     def _build_screen_mode_ui(self, frame) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(2, weight=1)
         # Row 1: Position List Label
         ttk.Label(frame, text="Click Order & Positions").grid(
             row=1, column=0, columnspan=2, sticky="w", pady=(0, 4)
@@ -1019,7 +1070,9 @@ class ClickerApp:
 
         # Row 2: Listbox
         list_frame = ttk.Frame(frame)
-        list_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
+        list_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
         self.screen_list = tk.Listbox(
             list_frame,
             height=9,
@@ -1036,9 +1089,9 @@ class ClickerApp:
             highlightbackground="#d2d0ce",
             highlightcolor="#0078d7"
         )
-        self.screen_list.grid(row=0, column=0)
+        self.screen_list.grid(row=0, column=0, sticky="nsew")
         self.screen_list.bind("<<ListboxSelect>>", self._on_screen_list_select)
-        
+
         scrollbar = ttk.Scrollbar(
             list_frame, orient="vertical", command=self.screen_list.yview
         )
@@ -1084,16 +1137,16 @@ class ClickerApp:
         edit_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         add_group = ttk.LabelFrame(edit_row, text="Add", padding=(6, 4))
         add_group.pack(side="left", padx=(0, 8))
-        ttk.Button(add_group, text="Dot", command=self.add_screen_dot, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wait", command=self.add_screen_wait, width=8).pack(side="left")
+        ttk.Button(add_group, text="Dot", command=self.add_screen_dot, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wait", command=self.add_screen_wait, width=9).pack(side="left")
 
         edit_group = ttk.LabelFrame(edit_row, text="Edit", padding=(6, 4))
         edit_group.pack(side="left")
-        ttk.Button(edit_group, text="Remove", command=self.remove_screen_position, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Up", width=4, command=lambda: self.move_screen_position(-1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Down", width=5, command=lambda: self.move_screen_position(1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Clear", command=self.clear_screen_positions, width=7).pack(side="left")
+        ttk.Button(edit_group, text="Remove", command=self.remove_screen_position, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Up", width=5, command=lambda: self.move_screen_position(-1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Down", width=6, command=lambda: self.move_screen_position(1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Clear", command=self.clear_screen_positions, width=8).pack(side="left")
 
     def _build_window_mode_ui(self, frame) -> None:
         # Two columns: Window Column and Click Point Column
@@ -1172,16 +1225,16 @@ class ClickerApp:
         pt_btn_row.pack(fill="x")
         add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
         add_group.pack(side="left", padx=(0, 8))
-        ttk.Button(add_group, text="Dot", command=self.add_window_dot, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wait", command=self.add_window_wait, width=8).pack(side="left")
+        ttk.Button(add_group, text="Dot", command=self.add_window_dot, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wait", command=self.add_window_wait, width=9).pack(side="left")
 
         edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
         edit_group.pack(side="left")
-        ttk.Button(edit_group, text="Remove", command=self.remove_window_position, width=8).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Up", width=4, command=lambda: self.move_window_position(-1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Down", width=5, command=lambda: self.move_window_position(1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions, width=7).pack(side="left")
+        ttk.Button(edit_group, text="Remove", command=self.remove_window_position, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Up", width=5, command=lambda: self.move_window_position(-1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Down", width=6, command=lambda: self.move_window_position(1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions, width=8).pack(side="left")
 
         # Selected Item Properties for Window Mode
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
@@ -2544,12 +2597,141 @@ class ClickerApp:
     def save_current_to_auto(self) -> None:
         config_path = get_auto_config_path()
         data = self._build_script_data()
+        normalize_script_data(data)
+        try:
+            timeout_seconds = int(self.auto_loop_timeout_var.get().strip())
+            max_rounds = int(self.auto_loop_max_rounds_var.get().strip())
+            if timeout_seconds < 0 or max_rounds < 0:
+                raise ValueError
+        except ValueError:
+            timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
+            max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
+        data["auto"]["loop_timeout_seconds"] = timeout_seconds
+        data["auto"]["loop_max_rounds"] = max_rounds
+        data["auto"]["target_wait_seconds"] = DEFAULT_TARGET_WAIT_SECONDS
         try:
             write_script_file(config_path, data)
         except Exception as e:
             messagebox.showerror("Auto Config Error", f"Failed to save auto config: {e}")
             return
         self.status_var.set(f"Auto config saved to {config_path}")
+
+    def open_auto_config_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Auto Startup Config")
+        dialog.resizable(False, False)
+
+        # Center dialog relative to main window
+        self.root.update_idletasks()
+        dialog.update_idletasks()
+        width = 560
+        height = 260
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (width // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (height // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        config_path = get_auto_config_path()
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        path_text = config_path
+        if len(path_text) > 72:
+            path_text = "..." + path_text[-69:]
+
+        ttk.Label(frame, text="Auto config file").grid(row=0, column=0, sticky="w")
+        ttk.Label(frame, text=path_text, foreground="#555555").grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 10))
+
+        ttk.Label(frame, text="Loop timeout (seconds)").grid(row=2, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=self.auto_loop_timeout_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+
+        ttk.Label(frame, text="Max loop rounds").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(frame, textvariable=self.auto_loop_max_rounds_var, width=10).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+
+        status_var = tk.StringVar()
+        if os.path.exists(config_path):
+            try:
+                existing = read_script_file(config_path)
+                auto = existing.get("auto", {})
+                self.auto_loop_timeout_var.set(str(auto.get("loop_timeout_seconds", DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS)))
+                self.auto_loop_max_rounds_var.set(str(auto.get("loop_max_rounds", DEFAULT_AUTO_LOOP_MAX_ROUNDS)))
+                status_var.set("Existing auto config loaded.")
+            except Exception as e:
+                status_var.set(f"Existing auto config is invalid: {e}")
+        else:
+            status_var.set("No auto config saved yet.")
+
+        def apply_auto_limits(data: dict) -> dict | None:
+            try:
+                timeout_seconds = int(self.auto_loop_timeout_var.get().strip())
+                max_rounds = int(self.auto_loop_max_rounds_var.get().strip())
+                if timeout_seconds < 0 or max_rounds < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid Auto Limits", "Enter non-negative whole numbers for timeout and rounds.")
+                return None
+
+            normalize_script_data(data)
+            data["auto"]["loop_timeout_seconds"] = timeout_seconds
+            data["auto"]["loop_max_rounds"] = max_rounds
+            data["auto"]["target_wait_seconds"] = DEFAULT_TARGET_WAIT_SECONDS
+            return data
+
+        def save_data_to_auto(data: dict, success_message: str) -> None:
+            data = apply_auto_limits(data)
+            if data is None:
+                return
+            try:
+                write_script_file(config_path, data)
+            except Exception as e:
+                messagebox.showerror("Auto Config Error", f"Failed to save auto config: {e}")
+                return
+            status_var.set(success_message)
+            self.status_var.set(success_message)
+
+        def import_to_auto() -> None:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Import Script To Auto Config",
+            )
+            if not file_path:
+                return
+            try:
+                data = read_script_file(file_path)
+            except Exception as e:
+                messagebox.showerror("Import Error", f"Failed to read script: {e}")
+                return
+            save_data_to_auto(data, f"Auto config imported from {file_path}")
+
+        def save_current_to_auto_inner() -> None:
+            save_data_to_auto(self._build_script_data(), "Current setup saved as auto config.")
+
+        def clear_auto_config() -> None:
+            if os.path.exists(config_path):
+                try:
+                    os.remove(config_path)
+                except Exception as e:
+                    messagebox.showerror("Auto Config Error", f"Failed to remove auto config: {e}")
+                    return
+            status_var.set("Auto config cleared.")
+            self.status_var.set("Auto config cleared.")
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        ttk.Button(button_row, text="Import Script", command=import_to_auto).pack(side="left")
+        ttk.Button(button_row, text="Save Current", command=save_current_to_auto_inner).pack(side="left", padx=(6, 0))
+        ttk.Button(button_row, text="Clear", command=clear_auto_config).pack(side="left", padx=(6, 0))
+        ttk.Button(button_row, text="Close", command=dialog.destroy).pack(side="right", padx=(20, 0))
+
+        ttk.Label(frame, textvariable=status_var, foreground="#005a9e").grid(
+            row=5,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(12, 0),
+        )
 
     def on_close(self) -> None:
         self._stop_event.set()
@@ -2655,7 +2837,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                 wait_ms = action.get("ms", 0)
                 if wait_ms > 0:
                     write_auto_log(log_path, f"wait action ms={wait_ms}")
-                    time.sleep(wait_ms / 1000.0)
+                    sleep_until_deadline(wait_ms / 1000.0, deadline)
                 continue
 
             if mode == "window":
@@ -2685,7 +2867,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
 
             delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
             if delay_ms > 0:
-                time.sleep(delay_ms / 1000.0)
+                sleep_until_deadline(delay_ms / 1000.0, deadline)
         rounds += 1
         write_auto_log(log_path, f"finished round {rounds}; clicks={clicks}")
         if not loop_enabled:
@@ -2706,15 +2888,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.auto:
-        log_path = get_auto_log_path()
-        config_path = args.config or get_auto_config_path()
-        write_auto_log(log_path, f"process started; argv={argv if argv is not None else sys.argv[1:]}")
-        result = run_auto_config(config_path, log_path)
-        write_auto_log(log_path, f"process finished; exit={result}")
-        return result
-    ClickerApp().run()
-    return 0
+
+    exe_name = os.path.basename(sys.executable).lower()
+    if args.silent and exe_name not in {"python.exe", "pythonw.exe"}:
+        try:
+            kernel32.FreeConsole()
+        except (AttributeError, OSError):
+            pass
+
+    mutex_handle = acquire_single_instance_mutex()
+    if mutex_handle is None:
+        if not args.silent:
+            show_already_running_message()
+        return 4
+
+    try:
+        if args.auto:
+            config_path = args.config or get_auto_config_path()
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"process started; argv={argv if argv is not None else sys.argv[1:]}")
+            result = run_auto_config(config_path, log_path)
+            write_auto_log(log_path, f"process finished; exit={result}")
+            return result
+
+        ClickerApp().run()
+        return 0
+    finally:
+        release_single_instance_mutex(mutex_handle)
 
 
 if __name__ == "__main__":
