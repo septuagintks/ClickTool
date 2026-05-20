@@ -17,6 +17,12 @@ kernel32 = ctypes.windll.kernel32
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
+WM_RBUTTONUP = 0x0205
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
+WM_MOUSEWHEEL = 0x020A
+WM_XBUTTONDOWN = 0x020B
+WM_XBUTTONUP = 0x020C
 VK_ESCAPE = 0x1B
 MK_LBUTTON = 0x0001
 
@@ -24,6 +30,13 @@ INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_XDOWN = 0x0080
+MOUSEEVENTF_XUP = 0x0100
+MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
@@ -100,32 +113,52 @@ CWP_SKIPINVISIBLE = 0x0001
 def makelong(low, high):
     return (low & 0xFFFF) | ((high & 0xFFFF) << 16)
 
-def send_mouse_click(x, y):
-    """Perform a hardware-level click using SendInput."""
+def send_mouse_click(x, y, button="left"):
+    """Perform a hardware-level click using SendInput. Backward-compatible left-click default."""
+    perform_screen_mouse_action({"type": "click", "x": x, "y": y, "button": button})
+
+
+def perform_screen_mouse_action(action: dict) -> bool:
+    """Perform a screen-space click or wheel action via SendInput."""
+    action_type = action.get("type", "click")
+    x = int(action["x"])
+    y = int(action["y"])
+
     screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
     screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
-    
-    # Normalized coordinates (0-65535)
-    nx = int(x * 65535 / (screen_w - 1))
-    ny = int(y * 65535 / (screen_h - 1))
-    
-    # Move
+    nx = int(x * 65535 / max(1, screen_w - 1))
+    ny = int(y * 65535 / max(1, screen_h - 1))
+
     inp_move = INPUT()
     inp_move.type = INPUT_MOUSE
     inp_move.iu.mi = MOUSEINPUT(nx, ny, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0, None)
-    
-    # Down
-    inp_down = INPUT()
-    inp_down.type = INPUT_MOUSE
-    inp_down.iu.mi = MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None)
-    
-    # Up
-    inp_up = INPUT()
-    inp_up.type = INPUT_MOUSE
-    inp_up.iu.mi = MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, None)
-    
-    inputs = (INPUT * 3)(inp_move, inp_down, inp_up)
-    user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
+
+    if action_type == "click":
+        button = action.get("button", "left")
+        down_flag, up_flag, mouse_data = BUTTON_INPUT_MAP.get(button, BUTTON_INPUT_MAP["left"])
+
+        inp_down = INPUT()
+        inp_down.type = INPUT_MOUSE
+        inp_down.iu.mi = MOUSEINPUT(0, 0, mouse_data, down_flag, 0, None)
+
+        inp_up = INPUT()
+        inp_up.type = INPUT_MOUSE
+        inp_up.iu.mi = MOUSEINPUT(0, 0, mouse_data, up_flag, 0, None)
+
+        inputs = (INPUT * 3)(inp_move, inp_down, inp_up)
+        user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
+        return True
+
+    if action_type == "wheel":
+        delta = coerce_wheel_delta(action.get("delta"), -1)
+        inp_wheel = INPUT()
+        inp_wheel.type = INPUT_MOUSE
+        inp_wheel.iu.mi = MOUSEINPUT(0, 0, delta * WHEEL_DELTA, MOUSEEVENTF_WHEEL, 0, None)
+        inputs = (INPUT * 2)(inp_move, inp_wheel)
+        user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+        return True
+
+    return False
 
 def enable_dpi_awareness() -> None:
     try:
@@ -234,6 +267,34 @@ AUTO_LOG_DIRNAME = "logs"
 DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
 DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
+WHEEL_DELTA = 120
+XBUTTON1 = 0x0001
+XBUTTON2 = 0x0002
+MK_XBUTTON1 = 0x0020
+MK_XBUTTON2 = 0x0040
+POSITION_ACTION_TYPES = {"click", "wheel"}
+MOUSE_BUTTONS = ("left", "right", "middle", "x1", "x2")
+MOUSE_BUTTON_LABELS = {
+    "left": "Left",
+    "right": "Right",
+    "middle": "Middle",
+    "x1": "Side 1",
+    "x2": "Side 2",
+}
+BUTTON_MESSAGE_MAP = {
+    "left": (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON, 0, 0),
+    "right": (WM_RBUTTONDOWN, WM_RBUTTONUP, 0x0002, 0, 0),  # MK_RBUTTON
+    "middle": (WM_MBUTTONDOWN, WM_MBUTTONUP, 0x0010, 0, 0),  # MK_MBUTTON
+    "x1": (WM_XBUTTONDOWN, WM_XBUTTONUP, MK_XBUTTON1, XBUTTON1, XBUTTON1),
+    "x2": (WM_XBUTTONDOWN, WM_XBUTTONUP, MK_XBUTTON2, XBUTTON2, XBUTTON2),
+}
+BUTTON_INPUT_MAP = {
+    "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, 0),
+    "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, 0),
+    "middle": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, 0),
+    "x1": (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON1),
+    "x2": (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON2),
+}
 
 class RECT(ctypes.Structure):
     _fields_ = [
@@ -349,6 +410,55 @@ def coerce_non_negative_int(value, default: int) -> int:
     return max(0, value)
 
 
+def is_position_action(action: dict) -> bool:
+    return action.get("type", "click") in POSITION_ACTION_TYPES
+
+
+def normalize_mouse_action(action: dict) -> dict:
+    action_type = action.get("type", "click")
+    if action_type == "click":
+        button = str(action.get("button", "left")).lower()
+        action["button"] = button if button in MOUSE_BUTTONS else "left"
+    elif action_type == "wheel":
+        action["delta"] = coerce_wheel_delta(action.get("delta"), -1)
+    return action
+
+
+def coerce_wheel_delta(value, default: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value != 0 else default
+
+
+def get_mouse_action_name(action: dict) -> str:
+    action_type = action.get("type", "click")
+    if action_type == "click":
+        button = action.get("button", "left")
+        return f"Click {MOUSE_BUTTON_LABELS.get(button, 'Left')}"
+    if action_type == "wheel":
+        delta = coerce_wheel_delta(action.get("delta"), -1)
+        direction = "Up" if delta > 0 else "Down"
+        return f"Wheel {direction}"
+    return "Wait"
+
+
+def get_mouse_action_details(action: dict, title: str | None = None) -> str:
+    prefix = f"[{title}] " if title else ""
+    action_type = action.get("type", "click")
+    suffix = ""
+    if action.get("delay") is not None:
+        suffix = f" (+{action['delay']}ms)"
+    if action_type == "click":
+        button = MOUSE_BUTTON_LABELS.get(action.get("button", "left"), "Left")
+        return f"{prefix}{button} at ({int(action['x'])}, {int(action['y'])}){suffix}"
+    if action_type == "wheel":
+        delta = coerce_wheel_delta(action.get("delta"), -1)
+        return f"{prefix}Delta {delta} at ({int(action['x'])}, {int(action['y'])}){suffix}"
+    return f"Delay: {action['ms']}ms"
+
+
 def normalize_script_data(data: dict) -> dict:
     if "mode" not in data:
         data["mode"] = "window" if data.get("window_positions") else "screen"
@@ -367,6 +477,10 @@ def normalize_script_data(data: dict) -> dict:
     hotkeys = settings.setdefault("hotkeys", {})
     for action, default in DEFAULT_HOTKEYS.items():
         hotkeys[action] = normalize_hotkey_text(hotkeys.get(action, default))
+
+    for collection_name in ("screen_positions", "window_positions", "actions"):
+        for action in data.get(collection_name, []):
+            normalize_mouse_action(action)
     return data
 
 
@@ -437,16 +551,50 @@ def wait_for_windows(titles: list[str], timeout_seconds: int, log_path: str | No
         time.sleep(1)
 
 
-def click_window_position(hwnd: int, x: int, y: int) -> bool:
+def make_wparam(low_word: int, high_word: int) -> int:
+    return ((int(high_word) & 0xFFFF) << 16) | (int(low_word) & 0xFFFF)
+
+
+def post_window_mouse_action(target_hwnd: int, action: dict, client_x: int, client_y: int, screen_x: int, screen_y: int) -> bool:
+    action_type = action.get("type", "click")
+    if action_type == "click":
+        button = action.get("button", "left")
+        down_msg, up_msg, down_low_word, down_high_word, up_high_word = BUTTON_MESSAGE_MAP.get(
+            button,
+            BUTTON_MESSAGE_MAP["left"],
+        )
+        lparam = makelong(client_x, client_y)
+        user32.PostMessageW(target_hwnd, down_msg, make_wparam(down_low_word, down_high_word), lparam)
+        user32.PostMessageW(target_hwnd, up_msg, make_wparam(0, up_high_word), lparam)
+        return True
+
+    if action_type == "wheel":
+        delta = coerce_wheel_delta(action.get("delta"), -1)
+        user32.PostMessageW(
+            target_hwnd,
+            WM_MOUSEWHEEL,
+            make_wparam(0, delta * WHEEL_DELTA),
+            makelong(screen_x, screen_y),
+        )
+        return True
+
+    return False
+
+
+def perform_window_mouse_action(hwnd: int, action: dict) -> bool:
+    """Perform a window-relative click or wheel action via PostMessage. Client-area only."""
     if not hwnd or not user32.IsWindow(hwnd):
         return False
     rect = get_window_rect(hwnd)
     bounds = get_client_bounds_in_window(hwnd)
     if not rect or not bounds:
         return False
+    x = int(action["x"])
+    y = int(action["y"])
     if not (bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]):
         return False
 
+    normalize_mouse_action(action)
     sx = int(rect[0] + x)
     sy = int(rect[1] + y)
     cl_tl = POINT(0, 0)
@@ -459,24 +607,27 @@ def click_window_position(hwnd: int, x: int, y: int) -> bool:
     user32.ClientToScreen(target_hwnd, ctypes.byref(t_cl_tl))
     tx = int(sx - t_cl_tl.x)
     ty = int(sy - t_cl_tl.y)
-    lparam = makelong(tx, ty)
-    user32.PostMessageW(target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-    user32.PostMessageW(target_hwnd, WM_LBUTTONUP, 0, lparam)
-    return True
+    return post_window_mouse_action(target_hwnd, action, tx, ty, sx, sy)
+
+
+def click_window_position(hwnd: int, x: int, y: int, button: str = "left") -> bool:
+    """Backward-compatible left click helper."""
+    return perform_window_mouse_action(hwnd, {"type": "click", "x": x, "y": y, "button": button})
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""
-    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None):
+    def __init__(self, master, index, x, y, on_move, on_click=None, hwnd=None, action_type="click"):
         super().__init__(master)
         self.index = index  # 0-based index
         self.on_move = on_move
         self.on_click = on_click
         self.hwnd = hwnd # If set, x and y are relative to this window's top-left
-        
+        self.action_type = action_type
+
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.75)
-        
+
         # Initialize position
         if self.hwnd:
             rect = get_window_rect(self.hwnd)
@@ -488,40 +639,56 @@ class DraggableDot(tk.Toplevel):
                 self.update_position(x, y)
         else:
             self.update_position(x, y)
-        
+
         # We use a canvas to draw a nice circle and number
         self.canvas = tk.Canvas(self, width=DOT_SIZE, height=DOT_SIZE, highlightthickness=0, bg='white')
         self.canvas.pack()
-        
+
         # Make white background transparent
         self.config(bg='white')
         self.attributes("-transparentcolor", "white")
-        
-        # 1. Outer halo border (Light Blue)
-        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill="#c7e0f4", outline="")
-        
-        # 2. Main Dot (Primary Blue)
+
+        # Determine colors based on action type
+        if action_type == "wheel":
+            halo_color = "#f1cbe9"  # Light Purple
+            dot_color = "#b4009e"   # Purple/Magenta
+        else:
+            halo_color = "#c7e0f4"  # Light Blue
+            dot_color = "#0078d7"   # Primary Blue
+
+        # 1. Outer halo border
+        self.halo = self.canvas.create_oval(2, 2, DOT_SIZE-2, DOT_SIZE-2, fill=halo_color, outline="")
+
+        # 2. Main Dot
         inner_m = 6
-        self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill="#0078d7", outline="white", width=1)
-        
+        self.circle = self.canvas.create_oval(inner_m, inner_m, DOT_SIZE-inner_m, DOT_SIZE-inner_m, fill=dot_color, outline="white", width=1)
+
         # 3. Sequence Number (Modern Segoe UI font)
         self.text = self.canvas.create_text(DOT_SIZE//2, DOT_SIZE//2, text=str(index+1), fill="white", font=("Segoe UI", 9, "bold"))
-        
+
         # 4. Glossy 3D Highlight Reflection
         self.highlight = self.canvas.create_oval(11, 11, 17, 15, fill="white", outline="")
-        
+
         self.canvas.bind("<Button-1>", self._on_start)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<Enter>", self._on_enter)
         self.canvas.bind("<Leave>", self._on_leave)
 
     def _on_enter(self, event):
-        self.canvas.itemconfig(self.halo, fill="#a9d1f5") # richer blue halo
-        self.canvas.itemconfig(self.circle, fill="#106ebe") # richer active blue
+        if self.action_type == "wheel":
+            self.canvas.itemconfig(self.halo, fill="#e2b1d6") # richer purple halo
+            self.canvas.itemconfig(self.circle, fill="#881794") # richer active purple
+        else:
+            self.canvas.itemconfig(self.halo, fill="#a9d1f5") # richer blue halo
+            self.canvas.itemconfig(self.circle, fill="#106ebe") # richer active blue
 
     def _on_leave(self, event):
-        self.canvas.itemconfig(self.halo, fill="#c7e0f4")
-        self.canvas.itemconfig(self.circle, fill="#0078d7")
+        if self.action_type == "wheel":
+            self.canvas.itemconfig(self.halo, fill="#f1cbe9")
+            self.canvas.itemconfig(self.circle, fill="#b4009e")
+        else:
+            self.canvas.itemconfig(self.halo, fill="#c7e0f4")
+            self.canvas.itemconfig(self.circle, fill="#0078d7")
         
     def update_position(self, x, y):
         """Update window geometry based on center coordinate."""
@@ -571,9 +738,12 @@ class ClickerApp:
 
         self.interval_var = tk.StringVar(value="500")
         self.step_delay_var = tk.StringVar()
+        self.custom_delay_var = tk.StringVar()
+        self.mouse_button_var = tk.StringVar(value="left")
         self.loop_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Ready")
         self._active_mode = "screen"
+        self._button_controls: list[tk.Widget] = []
         
         self.hotkey_vars = {
             action: tk.StringVar(value=default)
@@ -780,23 +950,54 @@ class ClickerApp:
         self.screen_list.config(yscrollcommand=scrollbar.set)
 
         # Row 3: Selected Item Properties
-        prop_frame = ttk.LabelFrame(frame, text="Selected Position Properties", padding=8)
+        prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
         prop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        
-        ttk.Label(prop_frame, text="Wait after (ms):").grid(row=0, column=0, sticky="w")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=10)
+        prop_frame.columnconfigure(3, weight=1)
+
+        self.screen_prop_label = ttk.Label(prop_frame, text="Value:")
+        self.screen_prop_label.grid(row=0, column=0, sticky="w")
+        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=15)
         self.screen_step_delay_entry.grid(row=0, column=1, padx=4)
         ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
-        ttk.Label(prop_frame, text="(Empty = use global interval)", font=("", 8), foreground="#666666").grid(row=1, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.screen_button_combo = ttk.Combobox(
+            prop_frame,
+            textvariable=self.mouse_button_var,
+            values=MOUSE_BUTTONS,
+            state="readonly",
+            width=12,
+        )
+        self.screen_button_combo.grid(row=1, column=1, sticky="w", padx=4, pady=(6, 0))
+        self.screen_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
+        self._button_controls.append(self.screen_button_combo)
+
+        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
+        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=12)
+        self.screen_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
+
+        ttk.Label(
+            prop_frame,
+            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            font=("", 8),
+            foreground="#666666",
+        ).grid(row=2, column=0, columnspan=4, sticky="w")
 
         # Row 4: Controls
         edit_row = ttk.Frame(frame)
         edit_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        ttk.Button(edit_row, text="Add Dot", command=self.add_screen_dot).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(edit_row, text="Remove", command=self.remove_screen_position).grid(row=0, column=1, padx=6)
-        ttk.Button(edit_row, text="Up", width=4, command=lambda: self.move_screen_position(-1)).grid(row=0, column=2, padx=(6, 0))
-        ttk.Button(edit_row, text="Down", width=5, command=lambda: self.move_screen_position(1)).grid(row=0, column=3, padx=(4, 0))
-        ttk.Button(edit_row, text="Clear", command=self.clear_screen_positions).grid(row=0, column=4, padx=(6, 0))
+        add_group = ttk.LabelFrame(edit_row, text="Add", padding=(6, 4))
+        add_group.pack(side="left", padx=(0, 8))
+        ttk.Button(add_group, text="Dot", command=self.add_screen_dot, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wait", command=self.add_screen_wait, width=8).pack(side="left")
+
+        edit_group = ttk.LabelFrame(edit_row, text="Edit", padding=(6, 4))
+        edit_group.pack(side="left")
+        ttk.Button(edit_group, text="Remove", command=self.remove_screen_position, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Up", width=4, command=lambda: self.move_screen_position(-1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Down", width=5, command=lambda: self.move_screen_position(1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Clear", command=self.clear_screen_positions, width=7).pack(side="left")
 
     def _build_window_mode_ui(self, frame) -> None:
         # Two columns: Window Column and Click Point Column
@@ -873,36 +1074,72 @@ class ClickerApp:
         
         pt_btn_row = ttk.Frame(pt_frame)
         pt_btn_row.pack(fill="x")
-        ttk.Button(pt_btn_row, text="Add Dot", command=self.add_window_dot).pack(side="left", padx=2)
-        ttk.Button(pt_btn_row, text="Remove", command=self.remove_window_position).pack(side="left", padx=2)
-        ttk.Button(pt_btn_row, text="Up", width=4, command=lambda: self.move_window_position(-1)).pack(side="left", padx=2)
-        ttk.Button(pt_btn_row, text="Down", width=5, command=lambda: self.move_window_position(1)).pack(side="left", padx=2)
-        ttk.Button(pt_btn_row, text="Clear", command=self.clear_window_positions).pack(side="left", padx=2)
+        add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
+        add_group.pack(side="left", padx=(0, 8))
+        ttk.Button(add_group, text="Dot", command=self.add_window_dot, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Wait", command=self.add_window_wait, width=8).pack(side="left")
+
+        edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
+        edit_group.pack(side="left")
+        ttk.Button(edit_group, text="Remove", command=self.remove_window_position, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Up", width=4, command=lambda: self.move_window_position(-1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Down", width=5, command=lambda: self.move_window_position(1)).pack(side="left", padx=(0, 4))
+        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions, width=7).pack(side="left")
 
         # Selected Item Properties for Window Mode
-        win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Position Properties", padding=8)
+        win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
         win_prop_frame.pack(fill="x", pady=(8, 0))
-        
-        ttk.Label(win_prop_frame, text="Wait after (ms):").grid(row=0, column=0, sticky="w")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=10)
+        win_prop_frame.columnconfigure(3, weight=1)
+
+        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:")
+        self.window_prop_label.grid(row=0, column=0, sticky="w")
+        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=15)
         self.window_step_delay_entry.grid(row=0, column=1, padx=4)
         ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
+
+        ttk.Label(win_prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.window_button_combo = ttk.Combobox(
+            win_prop_frame,
+            textvariable=self.mouse_button_var,
+            values=MOUSE_BUTTONS,
+            state="readonly",
+            width=12,
+        )
+        self.window_button_combo.grid(row=1, column=1, sticky="w", padx=4, pady=(6, 0))
+        self.window_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
+        self._button_controls.append(self.window_button_combo)
+
+        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
+        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=12)
+        self.window_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
+
+        ttk.Label(
+            win_prop_frame,
+            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            font=("", 8),
+            foreground="#666666",
+        ).grid(row=2, column=0, columnspan=4, sticky="w")
 
     def _on_tab_changed(self, event):
         """Show only the dots belonging to the active tab."""
         # If clicking is active, dots are already hidden
         if self._click_thread and self._click_thread.is_alive():
             return
-            
+
         current_tab = self.notebook.index(self.notebook.select())
         if current_tab == 0: # Screen
             self._active_mode = "screen"
-            for p in self._screen_positions: p["dot"].deiconify()
-            for p in self._window_positions: p["dot"].withdraw()
+            for p in self._screen_positions:
+                if is_position_action(p) and "dot" in p: p["dot"].deiconify()
+            for p in self._window_positions:
+                if is_position_action(p) and "dot" in p: p["dot"].withdraw()
         elif current_tab == 1: # Window
             self._active_mode = "window"
-            for p in self._screen_positions: p["dot"].withdraw()
-            for p in self._window_positions: p["dot"].deiconify()
+            for p in self._screen_positions:
+                if is_position_action(p) and "dot" in p: p["dot"].withdraw()
+            for p in self._window_positions:
+                if is_position_action(p) and "dot" in p: p["dot"].deiconify()
         else:
             self._set_dots_visible(False)
             
@@ -931,6 +1168,8 @@ class ClickerApp:
                                     p["dot"].hwnd = found_hwnd
 
             for p in self._window_positions:
+                if not is_position_action(p) or "dot" not in p:
+                    continue
                 hwnd = p.get("hwnd")
                 if hwnd and user32.IsWindow(hwnd):
                     if user32.IsIconic(hwnd):
@@ -1142,39 +1381,120 @@ class ClickerApp:
         if not sel: return
         index = sel[0]
         hwnd = self._target_windows[index]["hwnd"]
-        
+
         # Also remove any click points associated with this window
         to_remove = [i for i, p in enumerate(self._window_positions) if p.get("hwnd") == hwnd]
         for i in reversed(to_remove):
-            self._window_positions[i]["dot"].destroy()
+            if is_position_action(self._window_positions[i]) and "dot" in self._window_positions[i]:
+                self._window_positions[i]["dot"].destroy()
             del self._window_positions[i]
-            
+
         del self._target_windows[index]
         self._refresh_window_list()
         self._refresh_window_pt_list()
+
+    def _set_button_controls_enabled(self, enabled: bool) -> None:
+        state = "readonly" if enabled else "disabled"
+        for control in self._button_controls:
+            try:
+                control.config(state=state)
+            except tk.TclError:
+                pass
+
+    def _on_mouse_button_selected(self, event=None) -> None:
+        current_tab = self.notebook.index(self.notebook.select())
+        editing_screen = current_tab == 0 or (current_tab == 2 and self._active_mode == "screen")
+        listbox = self.screen_list if editing_screen else self.window_pt_list
+        positions = self._screen_positions if editing_screen else self._window_positions
+        sel = listbox.curselection()
+        if not sel:
+            return
+
+        index = sel[0]
+        if positions[index].get("type") != "click":
+            return
+
+        button = self.mouse_button_var.get()
+        positions[index]["button"] = button if button in MOUSE_BUTTONS else "left"
+        if editing_screen:
+            self._refresh_screen_list()
+            self.screen_list.selection_set(index)
+        else:
+            self._refresh_window_pt_list()
+            self.window_pt_list.selection_set(index)
 
     def add_screen_dot(self) -> None:
         """Create a new draggable dot at the center of the screen."""
         screen_w = user32.GetSystemMetrics(0)
         screen_h = user32.GetSystemMetrics(1)
         x, y = screen_w // 2, screen_h // 2
-        
+
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
-                          on_click=self._on_screen_dot_click)
-        
+                          on_click=self._on_screen_dot_click, action_type="click")
+
         self._screen_positions.append({
+            "type": "click",
             "x": x,
             "y": y,
+            "button": "left",
             "delay": None,
             "dot": dot
         })
         self._refresh_screen_list()
+        last_idx = len(self._screen_positions) - 1
         self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(index)
-        self.screen_list.activate(index)
+        self.screen_list.selection_set(last_idx)
+        self.screen_list.activate(last_idx)
         self._on_screen_list_select()
         self.status_var.set(f"Added screen dot at ({x}, {y}).")
+
+    def add_screen_wheel(self) -> None:
+        """Create a wheel action at the center of the screen."""
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        x, y = screen_w // 2, screen_h // 2
+
+        index = len(self._screen_positions)
+        dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
+                          on_click=self._on_screen_dot_click, action_type="wheel")
+
+        self._screen_positions.append({
+            "type": "wheel",
+            "x": x,
+            "y": y,
+            "delta": -1,
+            "delay": None,
+            "dot": dot
+        })
+        self._refresh_screen_list()
+        last_idx = len(self._screen_positions) - 1
+        self.screen_list.selection_clear(0, "end")
+        self.screen_list.selection_set(last_idx)
+        self.screen_list.activate(last_idx)
+        self._on_screen_list_select()
+        self.status_var.set(f"Added screen wheel action at ({x}, {y}).")
+
+    def add_screen_wait(self) -> None:
+        """Add a wait item to the screen list."""
+        wait_ms = 500
+        try:
+            interval = int(self.interval_var.get())
+            if interval > 0:
+                wait_ms = interval
+        except (TypeError, ValueError):
+            pass
+        self._screen_positions.append({
+            "type": "wait",
+            "ms": wait_ms,
+        })
+        self._refresh_screen_list()
+        last_idx = len(self._screen_positions) - 1
+        self.screen_list.selection_clear(0, "end")
+        self.screen_list.selection_set(last_idx)
+        self.screen_list.activate(last_idx)
+        self._on_screen_list_select()
+        self.status_var.set(f"Added {wait_ms}ms wait.")
 
     def _on_screen_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1196,22 +1516,37 @@ class ClickerApp:
         if not sel:
             return
         pos = self._screen_positions[sel[0]]
-        delay = pos["delay"]
-        self.step_delay_var.set(str(delay) if delay is not None else "")
+        ptype = pos.get("type", "click")
+        if ptype == "click":
+            self.screen_prop_label.config(text="Pos (x,y):")
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
+            self.mouse_button_var.set(pos.get("button", "left"))
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.screen_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(True)
+        elif ptype == "wheel":
+            self.screen_prop_label.config(text="Wheel (x,y,delta):")
+            self.step_delay_var.set(
+                f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
+            )
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.screen_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(False)
+        else:
+            self.screen_prop_label.config(text="Wait (ms):")
+            self.step_delay_var.set(str(pos.get("ms", 0)))
+            self.custom_delay_var.set("")
+            self.screen_custom_delay_entry.config(state="disabled")
+            self._set_button_controls_enabled(False)
 
     def remove_screen_position(self) -> None:
         sel = self.screen_list.curselection()
         if not sel:
             return
         index = sel[0]
-        self._screen_positions[index]["dot"].destroy()
+        if is_position_action(self._screen_positions[index]) and "dot" in self._screen_positions[index]:
+            self._screen_positions[index]["dot"].destroy()
         del self._screen_positions[index]
-        
-        # Update sequence numbers for remaining dots
-        for i in range(index, len(self._screen_positions)):
-            self._screen_positions[i]["dot"].index = i
-            self._screen_positions[i]["dot"].set_number(i + 1)
-            
         self._refresh_screen_list()
 
     def move_screen_position(self, delta: int) -> None:
@@ -1222,19 +1557,12 @@ class ClickerApp:
         target = index + delta
         if not 0 <= target < len(self._screen_positions):
             return
-            
-        # Swap in the data list
+
         self._screen_positions[index], self._screen_positions[target] = (
             self._screen_positions[target],
             self._screen_positions[index],
         )
-        
-        # Sync dot indices and labels
-        self._screen_positions[index]["dot"].index = index
-        self._screen_positions[index]["dot"].set_number(index + 1)
-        self._screen_positions[target]["dot"].index = target
-        self._screen_positions[target]["dot"].set_number(target + 1)
-        
+
         self._refresh_screen_list()
         self.screen_list.selection_set(target)
         self.screen_list.activate(target)
@@ -1242,25 +1570,30 @@ class ClickerApp:
 
     def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
-            p["dot"].destroy()
+            if is_position_action(p) and "dot" in p:
+                p["dot"].destroy()
         self._screen_positions.clear()
         self._refresh_screen_list()
 
     def _refresh_screen_list(self) -> None:
         self.screen_list.delete(0, "end")
-        for i in range(len(self._screen_positions)):
-            self._refresh_screen_list_item(i, append=True)
+        dot_count = 0
+        for i, item in enumerate(self._screen_positions):
+            if is_position_action(item):
+                dot_count += 1
+                if "dot" in item:
+                    item["dot"].index = i
+                    item["dot"].set_number(dot_count)
+                self.screen_list.insert(
+                    "end",
+                    f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item)}",
+                )
+            else:
+                self.screen_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
 
     def _refresh_screen_list_item(self, index, append=False):
-        pos = self._screen_positions[index]
-        delay_str = f" [Wait: {pos['delay']}ms]" if pos['delay'] is not None else ""
-        text = f"{index+1}: ({int(pos['x'])}, {int(pos['y'])}){delay_str}"
-        
-        if append:
-            self.screen_list.insert("end", text)
-        else:
-            self.screen_list.delete(index)
-            self.screen_list.insert(index, text)
+        # The append fast-path is no longer used — wheel/wait reorder dot numbering.
+        self._refresh_screen_list()
 
     def add_window_dot(self) -> None:
         """Create a new draggable dot for the selected window."""
@@ -1268,44 +1601,128 @@ class ClickerApp:
         if not sel_win:
             messagebox.showinfo("Select Window", "Select a target window from the left list first.")
             return
-            
+
         win_idx = sel_win[0]
         win_data = self._target_windows[win_idx]
         hwnd = win_data["hwnd"]
-        
+
         if not user32.IsWindow(hwnd):
             messagebox.showerror("Window Lost", "The selected window is no longer available.")
             return
-            
+
         rect = get_window_rect(hwnd)
         if rect is None:
             messagebox.showerror("Error", "Could not get window position.")
             return
-            
-        # Place dot at center of window (including title bar)
+
+        # Place dot at center of client area (client-area only in minified)
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
         rel_x, rel_y = win_w // 2, win_h // 2
-        
+        bounds = get_client_bounds_in_window(hwnd)
+        if bounds:
+            rel_x = (bounds[0] + bounds[2]) // 2
+            rel_y = (bounds[1] + bounds[3]) // 2
+
         index = len(self._window_positions)
-        dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move, 
-                          on_click=self._on_window_dot_click, hwnd=hwnd)
-        
+        dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
+                          on_click=self._on_window_dot_click, hwnd=hwnd, action_type="click")
+
         self._window_positions.append({
+            "type": "click",
             "x": rel_x,
             "y": rel_y,
+            "button": "left",
             "delay": None,
             "dot": dot,
             "hwnd": hwnd,
             "win_title": win_data["title"]
         })
         self._refresh_window_pt_list()
-        
+        last_idx = len(self._window_positions) - 1
+        self.window_pt_list.selection_clear(0, "end")
+        self.window_pt_list.selection_set(last_idx)
+        self.window_pt_list.activate(last_idx)
+
         # Keep focus on window list as requested
         self.target_win_list.selection_set(win_idx)
         self.target_win_list.activate(win_idx)
-        
+
         self.status_var.set(f"Added window dot for '{win_data['title']}' at ({rel_x}, {rel_y}).")
+
+    def add_window_wheel(self) -> None:
+        """Create a wheel action for the selected window."""
+        sel_win = self.target_win_list.curselection()
+        if not sel_win:
+            messagebox.showinfo("Select Window", "Select a target window from the left list first.")
+            return
+
+        win_idx = sel_win[0]
+        win_data = self._target_windows[win_idx]
+        hwnd = win_data["hwnd"]
+
+        if not user32.IsWindow(hwnd):
+            messagebox.showerror("Window Lost", "The selected window is no longer available.")
+            return
+
+        rect = get_window_rect(hwnd)
+        if rect is None:
+            messagebox.showerror("Error", "Could not get window position.")
+            return
+
+        win_w = rect[2] - rect[0]
+        win_h = rect[3] - rect[1]
+        rel_x, rel_y = win_w // 2, win_h // 2
+        bounds = get_client_bounds_in_window(hwnd)
+        if bounds:
+            rel_x = (bounds[0] + bounds[2]) // 2
+            rel_y = (bounds[1] + bounds[3]) // 2
+
+        index = len(self._window_positions)
+        dot = DraggableDot(self.root, index, rel_x, rel_y, self._on_window_dot_move,
+                          on_click=self._on_window_dot_click, hwnd=hwnd, action_type="wheel")
+
+        self._window_positions.append({
+            "type": "wheel",
+            "x": rel_x,
+            "y": rel_y,
+            "delta": -1,
+            "delay": None,
+            "dot": dot,
+            "hwnd": hwnd,
+            "win_title": win_data["title"]
+        })
+        self._refresh_window_pt_list()
+        last_idx = len(self._window_positions) - 1
+        self.window_pt_list.selection_clear(0, "end")
+        self.window_pt_list.selection_set(last_idx)
+        self.window_pt_list.activate(last_idx)
+
+        self.target_win_list.selection_set(win_idx)
+        self.target_win_list.activate(win_idx)
+
+        self.status_var.set(f"Added window wheel action for '{win_data['title']}' at ({rel_x}, {rel_y}).")
+
+    def add_window_wait(self) -> None:
+        """Add a wait item to the window list."""
+        wait_ms = 500
+        try:
+            interval = int(self.interval_var.get())
+            if interval > 0:
+                wait_ms = interval
+        except (TypeError, ValueError):
+            pass
+        self._window_positions.append({
+            "type": "wait",
+            "ms": wait_ms,
+        })
+        self._refresh_window_pt_list()
+        last_idx = len(self._window_positions) - 1
+        self.window_pt_list.selection_clear(0, "end")
+        self.window_pt_list.selection_set(last_idx)
+        self.window_pt_list.activate(last_idx)
+        self._on_window_list_select()
+        self.status_var.set(f"Added {wait_ms}ms wait.")
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1328,22 +1745,37 @@ class ClickerApp:
         if not sel:
             return
         pos = self._window_positions[sel[0]]
-        delay = pos["delay"]
-        self.step_delay_var.set(str(delay) if delay is not None else "")
+        ptype = pos.get("type", "click")
+        if ptype == "click":
+            self.window_prop_label.config(text="Pos (x,y):")
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
+            self.mouse_button_var.set(pos.get("button", "left"))
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.window_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(True)
+        elif ptype == "wheel":
+            self.window_prop_label.config(text="Wheel (x,y,delta):")
+            self.step_delay_var.set(
+                f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
+            )
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.window_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(False)
+        else:
+            self.window_prop_label.config(text="Wait (ms):")
+            self.step_delay_var.set(str(pos.get("ms", 0)))
+            self.custom_delay_var.set("")
+            self.window_custom_delay_entry.config(state="disabled")
+            self._set_button_controls_enabled(False)
 
     def remove_window_position(self) -> None:
         sel = self.window_pt_list.curselection()
         if not sel:
             return
         index = sel[0]
-        self._window_positions[index]["dot"].destroy()
+        if is_position_action(self._window_positions[index]) and "dot" in self._window_positions[index]:
+            self._window_positions[index]["dot"].destroy()
         del self._window_positions[index]
-        
-        # Update sequence numbers for remaining dots
-        for i in range(index, len(self._window_positions)):
-            self._window_positions[i]["dot"].index = i
-            self._window_positions[i]["dot"].set_number(i + 1)
-            
         self._refresh_window_pt_list()
 
     def move_window_position(self, delta: int) -> None:
@@ -1354,17 +1786,12 @@ class ClickerApp:
         target = index + delta
         if not 0 <= target < len(self._window_positions):
             return
-            
+
         self._window_positions[index], self._window_positions[target] = (
             self._window_positions[target],
             self._window_positions[index],
         )
-        
-        self._window_positions[index]["dot"].index = index
-        self._window_positions[index]["dot"].set_number(index + 1)
-        self._window_positions[target]["dot"].index = target
-        self._window_positions[target]["dot"].set_number(target + 1)
-        
+
         self._refresh_window_pt_list()
         self.window_pt_list.selection_set(target)
         self.window_pt_list.activate(target)
@@ -1372,59 +1799,117 @@ class ClickerApp:
 
     def clear_window_positions(self) -> None:
         for p in self._window_positions:
-            p["dot"].destroy()
+            if is_position_action(p) and "dot" in p:
+                p["dot"].destroy()
         self._window_positions.clear()
         self._refresh_window_pt_list()
 
     def _refresh_window_pt_list(self) -> None:
         self.window_pt_list.delete(0, "end")
-        for i in range(len(self._window_positions)):
-            self._refresh_window_pt_item(i, append=True)
+        dot_count = 0
+        for i, item in enumerate(self._window_positions):
+            if is_position_action(item):
+                dot_count += 1
+                if "dot" in item:
+                    item["dot"].index = i
+                    item["dot"].set_number(dot_count)
+                title = item.get('win_title', '')
+                short = (title[:15] + '..') if len(title) > 15 else title
+                self.window_pt_list.insert(
+                    "end",
+                    f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item, short)}",
+                )
+            else:
+                self.window_pt_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
 
     def _refresh_window_pt_item(self, index, append=False):
-        pos = self._window_positions[index]
-        delay_str = f" [Wait: {pos['delay']}ms]" if pos['delay'] is not None else ""
-        # Shorten title if too long
-        title = (pos['win_title'][:15] + '..') if len(pos['win_title']) > 15 else pos['win_title']
-        text = f"{index+1}: [{title}] ({int(pos['x'])}, {int(pos['y'])}){delay_str}"
-        
-        if append:
-            self.window_pt_list.insert("end", text)
-        else:
-            self.window_pt_list.delete(index)
-            self.window_pt_list.insert(index, text)
+        self._refresh_window_pt_list()
 
     def apply_step_delay(self):
-        """Save the custom delay for the selected position in either mode."""
+        """Save the parameters and custom delay for the selected position in either mode."""
         current_tab = self.notebook.index(self.notebook.select())
-        if current_tab == 0: # Screen
+        editing_screen = current_tab == 0 or (current_tab == 2 and self._active_mode == "screen")
+        if editing_screen:
             sel = self.screen_list.curselection()
             positions = self._screen_positions
-            refresh_fn = self._refresh_screen_list_item
-        else: # Window
+        else:
             sel = self.window_pt_list.curselection()
             positions = self._window_positions
-            refresh_fn = self._refresh_window_pt_item
-            
+
         if not sel:
             messagebox.showinfo("Selection Required", "Select a position first.")
             return
-        
-        val = self.step_delay_var.get().strip()
+
         index = sel[0]
-        if not val:
-            positions[index]["delay"] = None
-        else:
+        val = self.step_delay_var.get().strip()
+        ptype = positions[index].get("type", "click")
+
+        # Parse custom step delay
+        custom_delay_str = self.custom_delay_var.get().strip()
+        custom_delay = None
+        if custom_delay_str:
             try:
-                ms = int(val)
-                if ms < 0: raise ValueError
-                positions[index]["delay"] = ms
+                custom_delay = int(custom_delay_str)
+                if custom_delay < 0:
+                    raise ValueError
             except ValueError:
-                messagebox.showerror("Invalid Value", "Enter a non-negative integer for milliseconds.")
+                messagebox.showerror("Invalid Step Delay", "Enter a non-negative whole number for custom step delay.")
                 return
-        
-        refresh_fn(index)
-        self.status_var.set(f"Updated delay for item {index+1}.")
+
+        try:
+            if ptype == "click":
+                if val:
+                    parts = val.split(',')
+                    if len(parts) == 2:
+                        positions[index]["x"] = int(parts[0])
+                        positions[index]["y"] = int(parts[1])
+                positions[index]["button"] = (
+                    self.mouse_button_var.get()
+                    if self.mouse_button_var.get() in MOUSE_BUTTONS
+                    else "left"
+                )
+                positions[index]["delay"] = custom_delay
+            elif ptype == "wheel":
+                if val:
+                    parts = [p.strip() for p in val.split(',')]
+                    if len(parts) == 1:
+                        positions[index]["delta"] = coerce_wheel_delta(parts[0], -1)
+                    elif len(parts) == 3:
+                        positions[index]["x"] = int(parts[0])
+                        positions[index]["y"] = int(parts[1])
+                        positions[index]["delta"] = coerce_wheel_delta(parts[2], -1)
+                    else:
+                        raise ValueError
+                positions[index]["delay"] = custom_delay
+            else:
+                if not val:
+                    positions[index]["ms"] = 0
+                else:
+                    ms = int(val)
+                    if ms < 0:
+                        raise ValueError
+                    positions[index]["ms"] = ms
+        except ValueError:
+            messagebox.showerror("Invalid Value", "Enter ms, x,y for click, or x,y,delta for wheel.")
+            return
+
+        # Sync dot screen position if click or wheel
+        if ptype in POSITION_ACTION_TYPES and "dot" in positions[index]:
+            dot = positions[index]["dot"]
+            if dot.hwnd:
+                rect = get_window_rect(dot.hwnd)
+                if rect:
+                    dot.update_position(rect[0] + positions[index]["x"], rect[1] + positions[index]["y"])
+            else:
+                dot.update_position(positions[index]["x"], positions[index]["y"])
+
+        if editing_screen:
+            self._refresh_screen_list()
+            self.screen_list.selection_set(index)
+        else:
+            self._refresh_window_pt_list()
+            self.window_pt_list.selection_set(index)
+        self.status_var.set(f"Updated item {index+1}.")
 
     def reset_hotkeys(self) -> None:
         for action, default in DEFAULT_HOTKEYS.items():
@@ -1532,16 +2017,25 @@ class ClickerApp:
 
         self._stop_event.clear()
 
-        # Snapshot positions for the thread
+        # Snapshot positions for the thread (preserve all action fields)
         positions_snapshot = []
         for p in positions:
+            ptype = p.get("type", "click")
+            if ptype == "wait":
+                positions_snapshot.append({"type": "wait", "ms": p.get("ms", 0)})
+                continue
             snapshot = {
+                "type": ptype,
                 "x": p["x"],
                 "y": p["y"],
-                "delay": p["delay"]
+                "delay": p.get("delay"),
             }
+            if ptype == "click":
+                snapshot["button"] = p.get("button", "left")
+            elif ptype == "wheel":
+                snapshot["delta"] = coerce_wheel_delta(p.get("delta"), -1)
             if mode == "window":
-                snapshot["hwnd"] = p["hwnd"]
+                snapshot["hwnd"] = p.get("hwnd")
                 snapshot["win_title"] = p.get("win_title")
             positions_snapshot.append(snapshot)
 
@@ -1569,9 +2063,13 @@ class ClickerApp:
     def _set_dots_visible(self, visible: bool):
         # Apply to both modes just in case
         for p in self._screen_positions:
+            if not is_position_action(p) or "dot" not in p:
+                continue
             if visible: p["dot"].deiconify()
             else: p["dot"].withdraw()
         for p in self._window_positions:
+            if not is_position_action(p) or "dot" not in p:
+                continue
             if visible: p["dot"].deiconify()
             else: p["dot"].withdraw()
 
@@ -1603,14 +2101,23 @@ class ClickerApp:
                     p["dot"].hwnd = hwnd
 
     def _click_loop(self, global_interval_ms: int, positions: list[dict], mode: str, loop_enabled: bool) -> None:
-        global_interval_s = global_interval_ms / 1000.0
         while not self._stop_event.is_set():
             for pos in positions:
                 if self._stop_event.is_set():
                     break
 
+                ptype = pos.get("type", "click")
+
+                if ptype == "wait":
+                    wait_ms = pos.get("ms", 0)
+                    if wait_ms > 0:
+                        if self._stop_event.wait(wait_ms / 1000.0):
+                            break
+                    continue
+
+                # Click or wheel — needs a position and possibly a window
                 if mode == "window":
-                    hwnd = pos["hwnd"]
+                    hwnd = pos.get("hwnd")
                     if not hwnd or not user32.IsWindow(hwnd):
                         active_windows = list_visible_windows()
                         title = pos.get("win_title")
@@ -1625,14 +2132,14 @@ class ClickerApp:
                     if hwnd and user32.IsWindow(hwnd):
                         rect = get_window_rect(hwnd)
                         if rect:
-                            click_window_position(hwnd, pos["x"], pos["y"])
+                            perform_window_mouse_action(hwnd, pos)
                     else:
                         continue
                 else:
-                    self._click_at(pos["x"], pos["y"])
+                    perform_screen_mouse_action(pos)
 
                 # Determine wait time: per-step delay or global interval
-                delay_ms = pos["delay"] if pos["delay"] is not None else global_interval_ms
+                delay_ms = pos.get("delay") if pos.get("delay") is not None else global_interval_ms
                 wait_s = delay_ms / 1000.0
 
                 if wait_s > 0 and self._stop_event.wait(wait_s):
@@ -1651,13 +2158,41 @@ class ClickerApp:
         self.status_var.set("Stopped")
 
     def _click_at(self, x: int, y: int) -> None:
-        """Move and click using SendInput."""
+        """Move and left-click using SendInput. Backward-compatible wrapper."""
         send_mouse_click(x, y)
 
-    def export_script(self):
-        """Save the current configuration to a JSON file."""
-        data = normalize_script_data({
-            "mode": self._active_mode,
+    def _serialize_action(self, action: dict, include_window: bool = False) -> dict:
+        action_type = action.get("type", "click")
+        if action_type == "click":
+            data = {
+                "type": "click",
+                "x": action.get("x"),
+                "y": action.get("y"),
+                "button": action.get("button", "left"),
+                "delay": action.get("delay"),
+            }
+        elif action_type == "wheel":
+            data = {
+                "type": "wheel",
+                "x": action.get("x"),
+                "y": action.get("y"),
+                "delta": coerce_wheel_delta(action.get("delta"), -1),
+                "delay": action.get("delay"),
+            }
+        else:
+            data = {
+                "type": "wait",
+                "ms": action.get("ms", 0),
+            }
+        if include_window:
+            data["win_title"] = action.get("win_title")
+        return data
+
+    def _build_script_data(self) -> dict:
+        mode = self._active_mode
+        active_positions = self._screen_positions if mode == "screen" else self._window_positions
+        return normalize_script_data({
+            "mode": mode,
             "global_interval": self.interval_var.get(),
             "loop": self.loop_var.get(),
             "settings": {
@@ -1667,16 +2202,15 @@ class ClickerApp:
                     for action, var in self.hotkey_vars.items()
                 }
             },
-            "screen_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
-                for p in self._screen_positions
-            ],
+            "screen_positions": [self._serialize_action(p) for p in self._screen_positions],
             "target_windows": [w["title"] for w in self._target_windows],
-            "window_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"], "win_title": p["win_title"]}
-                for p in self._window_positions
-            ],
+            "window_positions": [self._serialize_action(p, include_window=True) for p in self._window_positions],
+            "actions": [self._serialize_action(p, include_window=(mode == "window")) for p in active_positions],
         })
+
+    def export_script(self):
+        """Save the current configuration to a JSON file."""
+        data = self._build_script_data()
 
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
@@ -1685,10 +2219,65 @@ class ClickerApp:
         )
         if file_path:
             try:
-                write_script_file(file_path, normalize_script_data(data))
+                write_script_file(file_path, data)
                 messagebox.showinfo("Export Successful", f"Script saved to {file_path}")
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to save script: {e}")
+
+    def _restore_screen_position(self, p_data: dict) -> None:
+        ptype = p_data.get("type", "click")
+        if ptype == "wait":
+            self._screen_positions.append({"type": "wait", "ms": coerce_non_negative_int(p_data.get("ms"), 0)})
+            return
+        idx = len(self._screen_positions)
+        dot = DraggableDot(
+            self.root, idx, p_data["x"], p_data["y"],
+            self._on_screen_dot_move,
+            on_click=self._on_screen_dot_click,
+            action_type=ptype,
+        )
+        entry = {
+            "type": ptype,
+            "x": p_data["x"],
+            "y": p_data["y"],
+            "delay": p_data.get("delay"),
+            "dot": dot,
+        }
+        if ptype == "click":
+            entry["button"] = p_data.get("button", "left")
+        else:
+            entry["delta"] = coerce_wheel_delta(p_data.get("delta"), -1)
+        self._screen_positions.append(entry)
+
+    def _restore_window_position(self, p_data: dict) -> None:
+        ptype = p_data.get("type", "click")
+        if ptype == "wait":
+            self._window_positions.append({"type": "wait", "ms": coerce_non_negative_int(p_data.get("ms"), 0)})
+            return
+        win_title = p_data.get("win_title", "")
+        found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
+        idx = len(self._window_positions)
+        dot = DraggableDot(
+            self.root, idx, p_data["x"], p_data["y"],
+            self._on_window_dot_move,
+            on_click=self._on_window_dot_click,
+            hwnd=found_hwnd,
+            action_type=ptype,
+        )
+        entry = {
+            "type": ptype,
+            "x": p_data["x"],
+            "y": p_data["y"],
+            "delay": p_data.get("delay"),
+            "dot": dot,
+            "hwnd": found_hwnd,
+            "win_title": win_title,
+        }
+        if ptype == "click":
+            entry["button"] = p_data.get("button", "left")
+        else:
+            entry["delta"] = coerce_wheel_delta(p_data.get("delta"), -1)
+        self._window_positions.append(entry)
 
     def import_script(self):
         """Load configuration from a JSON file."""
@@ -1698,81 +2287,50 @@ class ClickerApp:
         )
         if not file_path:
             return
-            
+
         try:
             data = read_script_file(file_path)
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to read script: {e}")
             return
-            
+
         # Clear existing
         self.clear_screen_positions()
         self.clear_window_positions()
         self._target_windows.clear()
-        
+
         # Restore global interval
         self.interval_var.set(data.get("global_interval", "500"))
         self.loop_var.set(data.get("loop", True))
-        
+
         # Restore hotkeys
         settings = data.get("settings", {})
         hotkeys = settings.get("hotkeys", {})
         for action, default in DEFAULT_HOTKEYS.items():
             self.hotkey_vars[action].set(hotkeys.get(action, default))
         self._apply_hotkeys(show_status=False)
-        
+
         # Restore screen positions
         for p_data in data.get("screen_positions", []):
-            idx = len(self._screen_positions)
-            dot = DraggableDot(self.root, idx, p_data["x"], p_data["y"], self._on_screen_dot_move,
-                              on_click=self._on_screen_dot_click)
-            self._screen_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot
-            })
+            self._restore_screen_position(p_data)
         self._refresh_screen_list()
-        
+
         # Restore target windows and re-find HWNDs
-        all_active_windows = []
-        def enum_callback(hwnd, lparam):
-            if user32.IsWindowVisible(hwnd):
-                title = get_window_title(hwnd)
-                if title:
-                    all_active_windows.append((hwnd, title))
-            return True
-        user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
-        
+        all_active_windows = list_visible_windows()
+
         missing_windows = []
         for win_title in data.get("target_windows", []):
-            # Find HWND by title
             found_hwnd = next((h for h, t in all_active_windows if t == win_title), None)
             if found_hwnd:
                 self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
             else:
                 missing_windows.append(win_title)
-        
+
         self._refresh_window_list()
-        
+
         # Restore window positions
         for p_data in data.get("window_positions", []):
-            win_title = p_data["win_title"]
-            found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None)
-            
-            # Even if hwnd not found, we keep the data but dot will be hidden/dummy if hwnd is None
-            idx = len(self._window_positions)
-            dot = DraggableDot(self.root, idx, p_data["x"], p_data["y"], self._on_window_dot_move,
-                              on_click=self._on_window_dot_click, hwnd=found_hwnd)
-            
-            self._window_positions.append({
-                "x": p_data["x"],
-                "y": p_data["y"],
-                "delay": p_data.get("delay"),
-                "dot": dot,
-                "hwnd": found_hwnd,
-                "win_title": win_title
-            })
+            self._restore_window_position(p_data)
         self._refresh_window_pt_list()
         
         if missing_windows:
@@ -1786,27 +2344,7 @@ class ClickerApp:
 
     def save_current_to_auto(self) -> None:
         config_path = get_auto_config_path()
-        data = normalize_script_data({
-            "mode": self._active_mode,
-            "global_interval": self.interval_var.get(),
-            "loop": self.loop_var.get(),
-            "settings": {
-                "window_client_area_only": True,
-                "hotkeys": {
-                    action: normalize_hotkey_text(var.get())
-                    for action, var in self.hotkey_vars.items()
-                }
-            },
-            "screen_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"]}
-                for p in self._screen_positions
-            ],
-            "target_windows": [w["title"] for w in self._target_windows],
-            "window_positions": [
-                {"x": p["x"], "y": p["y"], "delay": p["delay"], "win_title": p["win_title"]}
-                for p in self._window_positions
-            ],
-        })
+        data = self._build_script_data()
         try:
             write_script_file(config_path, data)
         except Exception as e:
@@ -1846,25 +2384,60 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
 
     write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
 
+    fallback_actions = data.get("window_positions", []) if mode == "window" else data.get("screen_positions", [])
+    raw_actions = data.get("actions") or fallback_actions
+
     if mode == "window":
         titles = set(data.get("target_windows", []))
-        titles.update(p.get("win_title") for p in data.get("window_positions", []) if p.get("win_title"))
+        titles.update(p.get("win_title") for p in fallback_actions if p.get("win_title"))
         titles = sorted(titles)
         window_map = wait_for_windows(titles, target_wait_seconds, log_path)
         actions = []
-        for p in data.get("window_positions", []):
+        for p in raw_actions:
+            normalize_mouse_action(p)
+            ptype = p.get("type", "click")
+            if ptype == "wait":
+                actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
+                continue
             hwnd = window_map.get(p.get("win_title"))
             if hwnd:
-                actions.append({"type": "click", "hwnd": hwnd, "x": p["x"], "y": p["y"], "delay": p.get("delay"), "win_title": p.get("win_title")})
+                entry = {
+                    "type": ptype,
+                    "hwnd": hwnd,
+                    "x": p["x"],
+                    "y": p["y"],
+                    "delay": p.get("delay"),
+                    "win_title": p.get("win_title"),
+                }
+                if ptype == "click":
+                    entry["button"] = p.get("button", "left")
+                else:
+                    entry["delta"] = coerce_wheel_delta(p.get("delta"), -1)
+                actions.append(entry)
             else:
                 write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
     else:
-        actions = [
-            {"type": "click", "x": p["x"], "y": p["y"], "delay": p.get("delay")}
-            for p in data.get("screen_positions", [])
-        ]
+        actions = []
+        for p in raw_actions:
+            normalize_mouse_action(p)
+            ptype = p.get("type", "click")
+            if ptype == "wait":
+                actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
+                continue
+            entry = {
+                "type": ptype,
+                "x": p["x"],
+                "y": p["y"],
+                "delay": p.get("delay"),
+            }
+            if ptype == "click":
+                entry["button"] = p.get("button", "left")
+            else:
+                entry["delta"] = coerce_wheel_delta(p.get("delta"), -1)
+            actions.append(entry)
 
-    if not actions:
+    runnable_count = sum(1 for a in actions if is_position_action(a))
+    if not runnable_count:
         write_auto_log(log_path, "no runnable actions; exit=3")
         return 3
 
@@ -1876,30 +2449,41 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if deadline is not None and time.monotonic() >= deadline:
                 write_auto_log(log_path, "loop timeout reached; exit=0")
                 return 0
+
+            ptype = action.get("type", "click")
+
+            if ptype == "wait":
+                wait_ms = action.get("ms", 0)
+                if wait_ms > 0:
+                    write_auto_log(log_path, f"wait action ms={wait_ms}")
+                    time.sleep(wait_ms / 1000.0)
+                continue
+
             if mode == "window":
                 hwnd = action.get("hwnd")
                 if not hwnd or not user32.IsWindow(hwnd):
                     active_windows = list_visible_windows()
                     title = action.get("win_title")
                     found_hwnd = next((h for h, t in active_windows if t == title), None)
-                    if not found_hwnd:
+                    if not found_hwnd and title:
                         found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
                     if found_hwnd:
                         hwnd = found_hwnd
                         action["hwnd"] = hwnd
                         write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
                 if hwnd and user32.IsWindow(hwnd):
-                    if click_window_position(hwnd, action["x"], action["y"]):
+                    if perform_window_mouse_action(hwnd, action):
                         clicks += 1
-                        write_auto_log(log_path, f"clicked window title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                        write_auto_log(log_path, f"ran window action type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
                     else:
-                        write_auto_log(log_path, f"skipped window click outside client area title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                        write_auto_log(log_path, f"skipped window action outside client area type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
                 else:
                     write_auto_log(log_path, f"missing window for action title={action.get('win_title')}")
             else:
-                send_mouse_click(int(action["x"]), int(action["y"]))
+                perform_screen_mouse_action(action)
                 clicks += 1
-                write_auto_log(log_path, f"clicked screen x={action.get('x')} y={action.get('y')}")
+                write_auto_log(log_path, f"ran screen action type={ptype} x={action.get('x')} y={action.get('y')}")
+
             delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
             if delay_ms > 0:
                 time.sleep(delay_ms / 1000.0)
