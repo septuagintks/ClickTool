@@ -9,6 +9,7 @@ DEFAULT_AUTO_LOOP_MAX_ROUNDS = 3
 DEFAULT_TARGET_WAIT_SECONDS = 60
 DEFAULT_INTERVAL_MS = 500
 DEFAULT_WAIT_MS = 500
+DEFAULT_ENABLE_GLOBAL_HOTKEYS = True
 
 POSITION_ACTION_TYPES = {"click", "wheel"}
 MOUSE_BUTTONS = ("left", "right", "middle", "x1", "x2")
@@ -86,6 +87,7 @@ def normalize_script_data(data: dict) -> dict:
     data["mode"] = infer_script_mode(data)
     settings = data.setdefault("settings", {})
     settings["window_client_area_only"] = True
+    settings["enable_global_hotkeys"] = bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
     settings["default_wait_ms"] = coerce_non_negative_int(
         settings.get("default_wait_ms"), DEFAULT_WAIT_MS
     )

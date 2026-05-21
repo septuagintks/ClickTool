@@ -77,6 +77,7 @@ Automation behavior:
 - **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling; standalone Wait items insert pauses between actions.
 - **Defaults & Shortcuts**: The Settings tab can change the default run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Wait, and Clear.
 - **Global Hotkey Interception**: Start, Stop, and add/clear actions can be triggered from any window without focusing ClickTool.
+- **Hotkey Scope Toggle**: Settings → Hotkey Scope → "Enable global hotkeys" turns global interception on (default) or off. Disable it before typing into apps that share the same shortcut letters (e.g. browser `Ctrl+D` bookmark) to avoid conflicts.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
 - **Log Rotation**: Auto-run logs are automatically rotated when they exceed 1 MB.
 

@@ -110,6 +110,7 @@ user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 user32.GetAncestor.restype = wintypes.HWND
 user32.GetParent.argtypes = [wintypes.HWND]
 user32.GetParent.restype = wintypes.HWND
+user32.GetParent.restype = wintypes.HWND
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
