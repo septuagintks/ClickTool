@@ -127,10 +127,11 @@ Run with `python ClickTool_m.pyz`.
 
 ### Standalone `.exe`
 
-You can also compile to a single executable using Nuitka:
+You can also compile to a single executable using PyInstaller:
 
 ```bash
-nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter clicktoolm.py
+pip install pyinstaller
+python -m PyInstaller --onefile --windowed --name=ClickTool_m --collect-submodules=clicktool_min clicktoolm.py
 ```
 
 This is mostly redundant with the main branch's `ClickTool.exe`. The minified branch is intended to ship as `.pyz` so users get the zero-dependency benefit.
