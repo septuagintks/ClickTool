@@ -1,35 +1,32 @@
+import os
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import win32gui
 import win32api
 import win32con
 
-from .winapi import POINT, VK_ESCAPE, enable_dpi_awareness
+from .winapi import user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness
 from .hotkey import (
-    DEFAULT_HOTKEYS, HOTKEY_ACTIONS, MODIFIER_STATE_BITS, MODIFIER_KEYS,
+    DEFAULT_HOTKEYS, HOTKEY_ACTIONS,
     is_hotkey_pressed_globally, normalize_hotkey_text, hotkey_from_event,
 )
 from .script import (
     DOT_SIZE, DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_PURE_BACKGROUND_WINDOW_CLICK,
     DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS,
-    POSITION_ACTION_TYPES, MOUSE_BUTTONS, MOUSE_BUTTON_LABELS,
+    MOUSE_BUTTONS,
     coerce_non_negative_int, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
     normalize_script_data, read_script_file, write_script_file,
 )
 from .window import (
-    RECT, get_window_title, get_window_rect, get_client_rect, client_to_screen,
+    get_window_title, get_window_rect,
     get_client_bounds_in_window, clamp_window_position,
-    list_visible_windows, find_windows_by_titles,
+    list_visible_windows,
     perform_screen_mouse_action, perform_window_mouse_action,
 )
-from .paths import (
-    get_app_data_dir, get_auto_config_path, get_auto_log_path,
-    write_auto_log,
-)
+from .paths import get_auto_config_path
 
 class DraggableDot(tk.Toplevel):
     """A semi-transparent, numbered, draggable dot that stays on top."""

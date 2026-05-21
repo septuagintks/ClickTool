@@ -41,6 +41,9 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
+EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+
 def enable_dpi_awareness() -> None:
     try:
         user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)

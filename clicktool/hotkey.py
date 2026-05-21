@@ -1,4 +1,4 @@
-import win32api
+from .winapi import user32
 
 DEFAULT_HOTKEYS = {
     "start": "F8",
