@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import win32gui
@@ -14,7 +15,7 @@ from .hotkey import (
 from .script import (
     DOT_SIZE, DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_PURE_BACKGROUND_WINDOW_CLICK,
-    DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS,
+    DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS, DEFAULT_ENABLE_GLOBAL_HOTKEYS,
     MOUSE_BUTTONS,
     coerce_non_negative_int, infer_script_mode, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
@@ -158,6 +159,7 @@ class ClickerApp:
         self.mouse_button_var = tk.StringVar(value="left")
         self.loop_var = tk.BooleanVar(value=True)
         self.pure_background_window_click_var = tk.BooleanVar(value=DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+        self.enable_global_hotkeys_var = tk.BooleanVar(value=DEFAULT_ENABLE_GLOBAL_HOTKEYS)
         self.status_var = tk.StringVar(value="Ready")
         self.auto_loop_timeout_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS))
         self.auto_loop_max_rounds_var = tk.StringVar(value=str(DEFAULT_AUTO_LOOP_MAX_ROUNDS))
@@ -185,6 +187,8 @@ class ClickerApp:
         self._apply_hotkeys(show_status=False)
         self.root.bind_all("<KeyPress>", self._on_key_press, add="+")
         self.sync_dots_loop()
+        self._hotkey_thread = threading.Thread(target=self._watch_global_hotkeys, daemon=True)
+        self._hotkey_thread.start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _apply_ui_theme(self) -> None:
@@ -309,8 +313,22 @@ class ClickerApp:
             wraplength=500,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
+        hotkey_scope_frame = ttk.LabelFrame(frame, text="Hotkey Scope", padding=10)
+        hotkey_scope_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Checkbutton(
+            hotkey_scope_frame,
+            text="Enable global hotkeys",
+            variable=self.enable_global_hotkeys_var,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            hotkey_scope_frame,
+            text="When enabled, shortcuts trigger system-wide (works without focusing ClickTool). When disabled, shortcuts only fire when ClickTool has focus.",
+            foreground="#555555",
+            wraplength=500,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+
         defaults_frame = ttk.LabelFrame(frame, text="Defaults", padding=10)
-        defaults_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        defaults_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         defaults_frame.columnconfigure(1, weight=1)
         ttk.Label(defaults_frame, text="Interval (ms)").grid(row=0, column=0, sticky="w")
         ttk.Entry(defaults_frame, textvariable=self.interval_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 18))
@@ -319,7 +337,7 @@ class ClickerApp:
         ttk.Button(defaults_frame, text="Apply", command=self.apply_defaults).grid(row=0, column=4, sticky="e", padx=(16, 0))
 
         hotkey_frame = ttk.LabelFrame(frame, text="Shortcuts", padding=10)
-        hotkey_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        hotkey_frame.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         for col in (1, 3):
             hotkey_frame.columnconfigure(col, weight=1)
 
@@ -604,13 +622,13 @@ class ClickerApp:
                     else:
                         rect = get_window_rect(hwnd)
                         if rect:
-                            p["x"], p["y"] = clamp_window_position(
+                            display_x, display_y = clamp_window_position(
                                 hwnd, p["x"], p["y"], self.pure_background_window_click_var.get()
                             )
                             p["dot"].pure_background = self.pure_background_window_click_var.get()
 
-                            sx = rect[0] + p["x"]
-                            sy = rect[1] + p["y"]
+                            sx = rect[0] + display_x
+                            sy = rect[1] + display_y
                             p["dot"].deiconify()
                             p["dot"].update_position(sx, sy)
                         else:
@@ -1529,6 +1547,7 @@ class ClickerApp:
             "loop": self.loop_var.get(),
             "settings": {
                 "pure_background_window_click": self.pure_background_window_click_var.get(),
+                "enable_global_hotkeys": self.enable_global_hotkeys_var.get(),
                 "default_wait_ms": coerce_non_negative_int(self.default_wait_var.get(), DEFAULT_WAIT_MS),
                 "hotkeys": {
                     action: normalize_hotkey_text(var.get())
@@ -1555,6 +1574,9 @@ class ClickerApp:
         settings = data.get("settings", {})
         self.pure_background_window_click_var.set(
             settings.get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+        )
+        self.enable_global_hotkeys_var.set(
+            bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
         )
         self.default_wait_var.set(str(settings.get("default_wait_ms", DEFAULT_WAIT_MS)))
         hotkeys = settings.get("hotkeys", {})
@@ -1865,6 +1887,42 @@ class ClickerApp:
                     self._stop_event.set()
                     break
 
+    def _watch_global_hotkeys(self) -> None:
+        last_fired: dict[str, float] = {}
+        debounce_seconds = 0.4
+        while True:
+            time.sleep(0.03)
+            if not self.enable_global_hotkeys_var.get():
+                continue
+            try:
+                hotkey_map = dict(self._hotkey_map)
+            except Exception:
+                continue
+
+            now = time.monotonic()
+            for hotkey, action in hotkey_map.items():
+                if not is_hotkey_pressed_globally(hotkey):
+                    continue
+                if now - last_fired.get(action, 0.0) < debounce_seconds:
+                    continue
+                last_fired[action] = now
+
+                if action == "stop":
+                    if self._click_thread and self._click_thread.is_alive():
+                        self._stop_event.set()
+                elif action == "start":
+                    if not self._click_thread or not self._click_thread.is_alive():
+                        self._safe_after(self.start_clicking)
+                else:
+                    self._safe_after(self._handle_hotkey_action, action)
+                break
+
+    def _safe_after(self, func, *args) -> None:
+        try:
+            self.root.after(0, func, *args)
+        except (RuntimeError, tk.TclError):
+            pass
+
     def _update_hwnd_from_thread(self, title: str, hwnd: int) -> None:
         for w in self._target_windows:
             if w["title"] == title:
@@ -1890,12 +1948,12 @@ class ClickerApp:
                             active_windows = list_visible_windows()
                             title = action.get("win_title")
                             found_hwnd = next((h for h, t in active_windows if t == title), None)
-                            if not found_hwnd:
+                            if not found_hwnd and title:
                                 found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
                             if found_hwnd:
                                 hwnd = found_hwnd
                                 action["hwnd"] = hwnd
-                                self.root.after(0, self._update_hwnd_from_thread, title, hwnd)
+                                self._safe_after(self._update_hwnd_from_thread, title, hwnd)
                         if hwnd and user32.IsWindow(hwnd):
                             perform_window_mouse_action(hwnd, action, pure_background)
                     else:
@@ -1917,7 +1975,7 @@ class ClickerApp:
             if not loop_enabled:
                 break
                     
-        self.root.after(0, self._on_loop_exit)
+        self._safe_after(self._on_loop_exit)
 
     def _on_loop_exit(self) -> None:
         self._set_dots_visible(True)
@@ -1957,6 +2015,9 @@ class ClickerApp:
 
     def on_close(self) -> None:
         self._stop_event.set()
+        thread = self._click_thread
+        if thread and thread.is_alive():
+            thread.join(timeout=1.0)
         self.root.destroy()
 
     def run(self) -> None:

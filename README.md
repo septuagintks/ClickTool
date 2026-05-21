@@ -79,6 +79,7 @@ Automation behavior:
 - **Custom Delays**: Set unique wait times for each individual click point.
 - **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling.
 - **Defaults & Shortcuts**: The Settings tab can change the run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Wait, and Clear.
+- **Global Hotkey Scope Toggle**: Settings → Hotkey Scope → "Enable global hotkeys" controls whether shortcuts trigger system-wide (default) or only when ClickTool has focus. Disable it to avoid conflicts while typing in other apps.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
 - **Emergency Stop**: Press **Esc** at any time to stop the clicking loop.
 

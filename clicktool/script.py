@@ -10,6 +10,7 @@ DEFAULT_TARGET_WAIT_SECONDS = 60
 DEFAULT_PURE_BACKGROUND_WINDOW_CLICK = True
 DEFAULT_INTERVAL_MS = 500
 DEFAULT_WAIT_MS = 500
+DEFAULT_ENABLE_GLOBAL_HOTKEYS = True
 
 POSITION_ACTION_TYPES = {"click", "wheel"}
 MOUSE_BUTTONS = ("left", "right", "middle", "x1", "x2")
@@ -86,7 +87,11 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
 def normalize_script_data(data: dict) -> dict:
     data["mode"] = infer_script_mode(data)
     settings = data.setdefault("settings", {})
-    settings.setdefault("window_client_area_only", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+    if "pure_background_window_click" not in settings and "window_client_area_only" in settings:
+        settings["pure_background_window_click"] = bool(settings["window_client_area_only"])
+    settings.pop("window_client_area_only", None)
+    settings.setdefault("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+    settings["enable_global_hotkeys"] = bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
     settings["default_wait_ms"] = coerce_non_negative_int(
         settings.get("default_wait_ms"), DEFAULT_WAIT_MS
     )
