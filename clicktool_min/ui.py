@@ -597,7 +597,7 @@ class ClickerApp:
                 if is_position_action(p) and "dot" in p: p["dot"].withdraw()
             for p in self._window_positions:
                 if is_position_action(p) and "dot" in p: p["dot"].deiconify()
-        else: # Settings — keep the last edited mode's dots visible so users
+        else: # Settings -- keep the last edited mode's dots visible so users
               # can see coordinate effects while tweaking shortcuts or defaults
             if self._active_mode == "screen":
                 for p in self._screen_positions:
@@ -1728,7 +1728,7 @@ class ClickerApp:
                             break
                     continue
 
-                # Click or wheel — needs a position and possibly a window
+                # Click or wheel -- needs a position and possibly a window
                 if mode == "window":
                     hwnd = pos.get("hwnd")
                     if not hwnd or not user32.IsWindow(hwnd):
@@ -1810,6 +1810,7 @@ class ClickerApp:
             "settings": {
                 "window_client_area_only": True,
                 "enable_global_hotkeys": self.enable_global_hotkeys_var.get(),
+                "default_wait_ms": coerce_non_negative_int(self.default_wait_var.get(), DEFAULT_WAIT_MS),
                 "hotkeys": {
                     action: normalize_hotkey_text(var.get())
                     for action, var in self.hotkey_vars.items()
@@ -1921,6 +1922,7 @@ class ClickerApp:
         self.enable_global_hotkeys_var.set(
             bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
         )
+        self.default_wait_var.set(str(settings.get("default_wait_ms", DEFAULT_WAIT_MS)))
         hotkeys = settings.get("hotkeys", {})
         for action, default in DEFAULT_HOTKEYS.items():
             self.hotkey_vars[action].set(hotkeys.get(action, default))

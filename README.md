@@ -13,7 +13,7 @@ A lightweight, zero-dependency Windows mouse auto-clicker with visual draggable 
 
 ### Task Scheduler Automation
 
-Use the GUI **Save Auto** button to save the startup configuration first. The app stores it at:
+Use the GUI **Auto Config** button to save the startup configuration first. The app stores it at:
 
 ```text
 %LOCALAPPDATA%\ClickTool\auto_config.json
@@ -95,7 +95,7 @@ Automation behavior:
 4. **Configure Sequence**: Adjust the order using Up/Down buttons, choose the click button for click actions, edit wheel deltas, and set per-step custom delays.
 5. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
 6. **Save/Load**: Use **Export** to save your configuration and **Import** to load it later.
-7. **Auto-run Setup**: Use **Save Auto** to write the startup config for `--auto --silent`.
+7. **Auto-run Setup**: Use **Auto Config** to write the startup config for `--auto --silent`.
 8. **Configure Hotkeys**: Go to **Settings** tab to customize Start/Stop shortcuts.
 9. **Run**: Click **Start** or press your configured hotkey (default: **F8**). Press **ESC** (or your configured stop key) to stop.
 
