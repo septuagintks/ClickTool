@@ -98,11 +98,35 @@ Automation behavior:
 - **None**: This is the lightweight version using direct Windows API calls.
 - Standard libraries used: `tkinter`, `json`, `threading`, `ctypes`, `time`, `argparse`, `os`, `sys`, `datetime`.
 
-## Build Executable
+## Build
 
-You can compile this tool into a standalone executable using `nuitka`:
+Two release formats are produced from this branch:
+
+### `.pyz` (recommended for minified)
+
+Build a Python zipapp — single file, ~120 KB, requires Python on the target machine but no third-party deps:
 
 ```bash
-nuitka --onefile --windows-console-mode=disable clicktoolm.py
+python -m zipapp <stage_dir> -o ClickTool_m.pyz -p "/usr/bin/env python"
 ```
+
+Where `<stage_dir>` contains `clicktoolm.py`, the `clicktool_min/` package, and a `__main__.py` with:
+
+```python
+from clicktoolm import main
+import sys
+sys.exit(main())
+```
+
+Run with `python ClickTool_m.pyz`.
+
+### Standalone `.exe`
+
+You can also compile to a single executable using Nuitka:
+
+```bash
+nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter clicktoolm.py
+```
+
+This is mostly redundant with the main branch's `ClickTool.exe`. The minified branch is intended to ship as `.pyz` so users get the zero-dependency benefit.
 
