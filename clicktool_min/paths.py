@@ -1,4 +1,5 @@
 import os
+import sys
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -40,19 +41,25 @@ def write_auto_log(log_path: str | None, message: str) -> None:
             if os.path.exists(old_path):
                 os.remove(old_path)
             os.rename(log_path, old_path)
-    except Exception:
-        pass
+    except OSError as e:
+        try:
+            print(f"[ClickTool] log rotate failed for {log_path}: {e}", file=sys.stderr)
+        except OSError:
+            pass
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] {message}\n")
-    except Exception:
-        pass
+    except OSError as e:
+        try:
+            print(f"[ClickTool] log write failed for {log_path}: {e}", file=sys.stderr)
+        except OSError:
+            pass
 
 
 def acquire_single_instance_mutex() -> int | None:
     mutex_name = f"Local\\{APP_NAME}SingleInstance"
-    handle = kernel32.CreateMutexW(None, True, mutex_name)
+    handle = kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
         return None
     if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
@@ -63,7 +70,6 @@ def acquire_single_instance_mutex() -> int | None:
 
 def release_single_instance_mutex(handle: int | None) -> None:
     if handle:
-        kernel32.ReleaseMutex(handle)
         kernel32.CloseHandle(handle)
 
 

@@ -1749,6 +1749,9 @@ class ClickerApp:
             # If loop is disabled, stop after one full pass
             if not loop_enabled:
                 break
+            # Yield 1ms each round so configs with all-zero delays don't pin a CPU core
+            if self._stop_event.wait(0.001):
+                break
 
         self._safe_after(self._on_loop_exit)
 
