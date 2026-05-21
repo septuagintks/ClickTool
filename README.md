@@ -109,13 +109,14 @@ Automation behavior:
 
 ## Build Executable
 
-You can compile this tool into a standalone executable using Nuitka:
+You can compile this tool into a standalone executable using PyInstaller:
 
 ```bash
-python -m nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=clicktool clicktool.py
+pip install pyinstaller
+python -m PyInstaller --onefile --windowed --name=ClickTool --collect-submodules=clicktool clicktool.py
 ```
 
-This produces a single `clicktool.exe` (~9.4 MB) that runs without Python or any dependencies installed.
+This produces a single `dist/ClickTool.exe` (~12.8 MB) that runs without Python or any dependencies installed.
 
 *Note: Requires `pywin32` to be installed in the build environment.*
 
