@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     exe_name = os.path.basename(sys.executable).lower()
-    if args.silent and exe_name not in {"python.exe", "pythonw.exe"}:
+    if (args.silent or not args.auto) and exe_name != "pythonw.exe":
         try:
             kernel32.FreeConsole()
         except (AttributeError, OSError):
