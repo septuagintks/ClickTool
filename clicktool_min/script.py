@@ -29,6 +29,10 @@ def coerce_non_negative_int(value, default: int) -> int:
     return max(0, value)
 
 
+def infer_script_mode(data: dict) -> str:
+    return data.get("mode") or ("window" if data.get("window_positions") else "screen")
+
+
 def is_position_action(action: dict) -> bool:
     return action.get("type", "click") in POSITION_ACTION_TYPES
 
@@ -79,8 +83,7 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
 
 
 def normalize_script_data(data: dict) -> dict:
-    if "mode" not in data:
-        data["mode"] = "window" if data.get("window_positions") else "screen"
+    data["mode"] = infer_script_mode(data)
     settings = data.setdefault("settings", {})
     settings["window_client_area_only"] = True
     settings["default_wait_ms"] = coerce_non_negative_int(

@@ -10,8 +10,8 @@ from clicktool_min.paths import (
     show_already_running_message,
 )
 from clicktool_min.script import (
-    coerce_non_negative_int, coerce_wheel_delta, is_position_action,
-    normalize_mouse_action, read_script_file,
+    coerce_non_negative_int, coerce_wheel_delta, infer_script_mode,
+    is_position_action, normalize_mouse_action, read_script_file,
     DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS,
 )
@@ -33,7 +33,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         write_auto_log(log_path, f"failed to read config: {e}; exit=2")
         return 2
 
-    mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+    mode = infer_script_mode(data)
     loop_enabled = bool(data.get("loop", True))
     global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
     auto = data.get("auto", {})
