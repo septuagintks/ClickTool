@@ -3,15 +3,15 @@ import os
 import sys
 import time
 
-from clicktool.winapi import enable_dpi_awareness
+from clicktool.winapi import user32, sleep_until_deadline
 from clicktool.paths import (
     get_auto_config_path, get_auto_log_path, write_auto_log,
     acquire_single_instance_mutex, release_single_instance_mutex,
     show_already_running_message,
 )
 from clicktool.script import (
-    coerce_non_negative_int, coerce_wheel_delta, is_position_action,
-    normalize_mouse_action, read_script_file,
+    coerce_non_negative_int, coerce_wheel_delta, infer_script_mode,
+    is_position_action, normalize_mouse_action, read_script_file,
     DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS,
 )
@@ -20,18 +20,6 @@ from clicktool.window import (
     perform_screen_mouse_action, perform_window_mouse_action,
 )
 from clicktool.ui import ClickerApp
-import win32gui
-
-
-def sleep_until_deadline(seconds: float, deadline: float | None) -> None:
-    if seconds <= 0:
-        return
-    if deadline is None:
-        time.sleep(seconds)
-        return
-    remaining = deadline - time.monotonic()
-    if remaining > 0:
-        time.sleep(min(seconds, remaining))
 
 
 def run_auto_config(config_path: str, log_path: str | None = None) -> int:
@@ -45,7 +33,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         write_auto_log(log_path, f"failed to read config: {e}; exit=2")
         return 2
 
-    mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+    mode = infer_script_mode(data)
     loop_enabled = bool(data.get("loop", True))
     global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
     auto = data.get("auto", {})
@@ -135,7 +123,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
 
             if mode == "window":
                 hwnd = action.get("hwnd")
-                if not hwnd or not win32gui.IsWindow(hwnd):
+                if not hwnd or not user32.IsWindow(hwnd):
                     active_windows = list_visible_windows()
                     title = action.get("win_title")
                     found_hwnd = next((h for h, t in active_windows if t == title), None)
@@ -145,7 +133,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                         hwnd = found_hwnd
                         action["hwnd"] = hwnd
                         write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
-                if hwnd and win32gui.IsWindow(hwnd):
+                if hwnd and user32.IsWindow(hwnd):
                     if perform_window_mouse_action(hwnd, action):
                         clicks += 1
                         write_auto_log(log_path, f"ran window action type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
@@ -197,7 +185,6 @@ def main(argv: list[str] | None = None) -> int:
             write_auto_log(log_path, f"process finished; exit={result}")
             return result
 
-        enable_dpi_awareness()
         ClickerApp().run()
         return 0
     finally:

@@ -96,6 +96,14 @@ def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
             return False
     return (user32.GetAsyncKeyState(vk) & 0x8000) != 0
 
+def canonical_key_name(key: str) -> str:
+    if len(key) == 1:
+        return key.upper()
+    if key.lower().startswith("f") and key[1:].isdigit():
+        return key.upper()
+    return key[:1].upper() + key[1:]
+
+
 def normalize_hotkey_text(value) -> str:
     text = str(value or "").strip()
     if not text:
@@ -106,8 +114,6 @@ def normalize_hotkey_text(value) -> str:
     if not parts:
         return ""
 
-    modifiers: list[str] = []
-    key = ""
     aliases = {
         "control": "Ctrl",
         "ctrl": "Ctrl",
@@ -124,6 +130,8 @@ def normalize_hotkey_text(value) -> str:
         "tab": "Tab",
     }
 
+    modifiers: list[str] = []
+    key = ""
     for part in parts:
         mapped = aliases.get(part.lower())
         if mapped in MODIFIER_STATE_BITS:
@@ -136,14 +144,6 @@ def normalize_hotkey_text(value) -> str:
         return ""
     ordered_modifiers = [name for name in ("Ctrl", "Alt", "Shift") if name in modifiers]
     return "+".join([*ordered_modifiers, key])
-
-
-def canonical_key_name(key: str) -> str:
-    if len(key) == 1:
-        return key.upper()
-    if key.lower().startswith("f") and key[1:].isdigit():
-        return key.upper()
-    return key[:1].upper() + key[1:]
 
 
 def hotkey_from_event(event) -> str:

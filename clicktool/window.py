@@ -1,29 +1,14 @@
 import ctypes
-from ctypes import wintypes
 import time
 import win32gui
 import win32api
 
 from .winapi import (
-    user32, POINT, WM_MOUSEWHEEL, WHEEL_DELTA,
-    MOUSEEVENTF_WHEEL,
+    user32, POINT, RECT, WM_MOUSEWHEEL, WHEEL_DELTA,
+    MOUSEEVENTF_WHEEL, BUTTON_MESSAGE_MAP, BUTTON_INPUT_MAP,
+    makelong, make_wparam,
 )
-from .script import (
-    BUTTON_MESSAGE_MAP, BUTTON_INPUT_MAP, coerce_wheel_delta, normalize_mouse_action,
-)
-
-
-class RECT(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
-
-
-user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
-user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+from .script import coerce_wheel_delta, normalize_mouse_action
 
 
 def get_window_title(hwnd):
@@ -120,14 +105,6 @@ def wait_for_windows(titles: list[str], timeout_seconds: int, log_path: str | No
         time.sleep(1)
 
 
-def make_lparam(x: int, y: int) -> int:
-    return ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)
-
-
-def make_wparam(low_word: int, high_word: int) -> int:
-    return ((int(high_word) & 0xFFFF) << 16) | (int(low_word) & 0xFFFF)
-
-
 def perform_screen_mouse_action(action: dict) -> bool:
     action_type = action.get("type", "click")
     x = int(action["x"])
@@ -158,7 +135,7 @@ def post_window_mouse_action(target_hwnd: int, action: dict, client_x: int, clie
             button,
             BUTTON_MESSAGE_MAP["left"],
         )
-        lparam = make_lparam(client_x, client_y)
+        lparam = makelong(client_x, client_y)
         win32gui.PostMessage(target_hwnd, down_msg, make_wparam(down_low_word, down_high_word), lparam)
         win32gui.PostMessage(target_hwnd, up_msg, make_wparam(0, up_high_word), lparam)
         return True
@@ -169,7 +146,7 @@ def post_window_mouse_action(target_hwnd: int, action: dict, client_x: int, clie
             target_hwnd,
             WM_MOUSEWHEEL,
             make_wparam(0, delta * WHEEL_DELTA),
-            make_lparam(screen_x, screen_y),
+            makelong(screen_x, screen_y),
         )
         return True
 

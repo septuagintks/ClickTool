@@ -21,22 +21,6 @@ MOUSE_BUTTON_LABELS = {
     "x2": "Side 2",
 }
 
-BUTTON_MESSAGE_MAP = {
-    "left": (0x0201, 0x0202, 0x0001, 0, 0),
-    "right": (0x0204, 0x0205, 0x0002, 0, 0),
-    "middle": (0x0207, 0x0208, 0x0010, 0, 0),
-    "x1": (0x020B, 0x020C, 0x0020, 0x0001, 0x0001),
-    "x2": (0x020B, 0x020C, 0x0040, 0x0002, 0x0002),
-}
-
-BUTTON_INPUT_MAP = {
-    "left": (0x0002, 0x0004, 0),
-    "right": (0x0008, 0x0010, 0),
-    "middle": (0x0020, 0x0040, 0),
-    "x1": (0x0080, 0x0100, 0x0001),
-    "x2": (0x0080, 0x0100, 0x0002),
-}
-
 
 def coerce_non_negative_int(value, default: int) -> int:
     try:
@@ -44,6 +28,10 @@ def coerce_non_negative_int(value, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(0, value)
+
+
+def infer_script_mode(data: dict) -> str:
+    return data.get("mode") or ("window" if data.get("window_positions") else "screen")
 
 
 def is_position_action(action: dict) -> bool:
@@ -121,8 +109,7 @@ def write_script_file(file_path: str, data: dict) -> None:
 
 
 def normalize_script_data(data: dict) -> dict:
-    if "mode" not in data:
-        data["mode"] = "window" if data.get("window_positions") else "screen"
+    data["mode"] = infer_script_mode(data)
     settings = data.setdefault("settings", {})
     settings.setdefault("window_client_area_only", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
     settings["default_wait_ms"] = coerce_non_negative_int(

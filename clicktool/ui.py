@@ -16,7 +16,7 @@ from .script import (
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_PURE_BACKGROUND_WINDOW_CLICK,
     DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS,
     MOUSE_BUTTONS,
-    coerce_non_negative_int, is_position_action, normalize_mouse_action,
+    coerce_non_negative_int, infer_script_mode, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
     normalize_script_data, read_script_file, write_script_file,
 )
@@ -1562,7 +1562,7 @@ class ClickerApp:
             self.hotkey_vars[action].set(hotkeys.get(action, default))
         self._apply_hotkeys(show_status=False)
 
-        mode = data.get("mode", "window" if data.get("window_positions") else "screen")
+        mode = infer_script_mode(data)
         self.notebook.select(0 if mode == "screen" else 1)
 
         for p_data in data.get("screen_positions", []):
