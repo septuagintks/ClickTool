@@ -585,7 +585,7 @@ class ClickerApp:
                 if is_position_action(p): p["dot"].withdraw()
             for p in self._window_positions:
                 if is_position_action(p): p["dot"].deiconify()
-        else: # Settings — keep the last edited mode's dots visible so users
+        else: # Settings -- keep the last edited mode's dots visible so users
               # can see coordinate effects while tweaking shortcuts or defaults
             if self._active_mode == "screen":
                 for p in self._screen_positions:
