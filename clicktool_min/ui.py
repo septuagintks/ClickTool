@@ -875,8 +875,8 @@ class ClickerApp:
             except Exception:
                 pass
         if x is None or y is None:
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
+            screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
+            screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
             x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)
@@ -910,8 +910,8 @@ class ClickerApp:
             except Exception:
                 pass
         if x is None or y is None:
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
+            screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
+            screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
             x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)

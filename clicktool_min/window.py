@@ -70,7 +70,8 @@ def list_visible_windows() -> list[tuple[int, str]]:
                 windows.append((hwnd, title))
         return True
 
-    user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+    cb = EnumWindowsProc(enum_callback)
+    user32.EnumWindows(cb, 0)
     return windows
 
 
