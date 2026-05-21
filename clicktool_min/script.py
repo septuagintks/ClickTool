@@ -30,6 +30,26 @@ def coerce_non_negative_int(value, default: int) -> int:
     return max(0, value)
 
 
+def coerce_optional_non_negative_int(value):
+    if value is None:
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def coerce_int_or(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(round(float(value)))
+        except (TypeError, ValueError):
+            return default
+
+
 def infer_script_mode(data: dict) -> str:
     return data.get("mode") or ("window" if data.get("window_positions") else "screen")
 
@@ -43,8 +63,16 @@ def normalize_mouse_action(action: dict) -> dict:
     if action_type == "click":
         button = str(action.get("button", "left")).lower()
         action["button"] = button if button in MOUSE_BUTTONS else "left"
+        action["x"] = coerce_int_or(action.get("x"), 0)
+        action["y"] = coerce_int_or(action.get("y"), 0)
+        action["delay"] = coerce_optional_non_negative_int(action.get("delay"))
     elif action_type == "wheel":
         action["delta"] = coerce_wheel_delta(action.get("delta"), -1)
+        action["x"] = coerce_int_or(action.get("x"), 0)
+        action["y"] = coerce_int_or(action.get("y"), 0)
+        action["delay"] = coerce_optional_non_negative_int(action.get("delay"))
+    elif action_type == "wait":
+        action["ms"] = coerce_non_negative_int(action.get("ms"), 0)
     return action
 
 

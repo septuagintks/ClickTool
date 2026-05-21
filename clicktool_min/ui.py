@@ -1063,8 +1063,23 @@ class ClickerApp:
                 self.screen_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
 
     def _refresh_screen_list_item(self, index, append=False):
-        # The append fast-path is no longer used — wheel/wait reorder dot numbering.
-        self._refresh_screen_list()
+        if not (0 <= index < len(self._screen_positions)):
+            return
+        if index >= self.screen_list.size():
+            self._refresh_screen_list()
+            return
+        item = self._screen_positions[index]
+        if is_position_action(item):
+            dot_count = sum(1 for p in self._screen_positions[: index + 1] if is_position_action(p))
+            text = f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item)}"
+        else:
+            text = f"   Wait: {item.get('ms', 0)}ms"
+        had_selection = index in (self.screen_list.curselection() or ())
+        self.screen_list.delete(index)
+        self.screen_list.insert(index, text)
+        if had_selection:
+            self.screen_list.selection_set(index)
+            self.screen_list.activate(index)
 
     def add_window_dot(self, at_cursor: bool = False) -> None:
         """Create a new draggable dot for the selected window."""
@@ -1322,7 +1337,25 @@ class ClickerApp:
                 self.window_pt_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
 
     def _refresh_window_pt_item(self, index, append=False):
-        self._refresh_window_pt_list()
+        if not (0 <= index < len(self._window_positions)):
+            return
+        if index >= self.window_pt_list.size():
+            self._refresh_window_pt_list()
+            return
+        item = self._window_positions[index]
+        if is_position_action(item):
+            dot_count = sum(1 for p in self._window_positions[: index + 1] if is_position_action(p))
+            title = item.get('win_title', '') or ''
+            short = (title[:15] + '..') if len(title) > 15 else title
+            text = f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item, short)}"
+        else:
+            text = f"   Wait: {item.get('ms', 0)}ms"
+        had_selection = index in (self.window_pt_list.curselection() or ())
+        self.window_pt_list.delete(index)
+        self.window_pt_list.insert(index, text)
+        if had_selection:
+            self.window_pt_list.selection_set(index)
+            self.window_pt_list.activate(index)
 
     def apply_step_delay(self):
         """Save the parameters and custom delay for the selected position in either mode."""

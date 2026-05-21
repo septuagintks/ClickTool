@@ -1,7 +1,9 @@
 from .winapi import (
     user32, kernel32, POINT, RECT, INPUT, MOUSEINPUT, INPUT_MOUSE,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_WHEEL,
-    SM_CXSCREEN, SM_CYSCREEN, WHEEL_DELTA,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
+    SM_CXSCREEN, SM_CYSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    WHEEL_DELTA,
     WM_MOUSEWHEEL,
     BUTTON_INPUT_MAP, BUTTON_MESSAGE_MAP,
     CWP_SKIPINVISIBLE, EnumWindowsProc,
@@ -109,14 +111,22 @@ def perform_screen_mouse_action(action: dict) -> bool:
     x = int(action["x"])
     y = int(action["y"])
 
-    screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
-    screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
-    nx = int(x * 65535 / max(1, screen_w - 1))
-    ny = int(y * 65535 / max(1, screen_h - 1))
+    vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+    vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+    vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    if vw <= 0 or vh <= 0:
+        # Fallback to primary monitor when virtual desktop metrics aren't reported.
+        vx, vy = 0, 0
+        vw = max(1, user32.GetSystemMetrics(SM_CXSCREEN))
+        vh = max(1, user32.GetSystemMetrics(SM_CYSCREEN))
+    nx = int((x - vx) * 65535 / max(1, vw - 1))
+    ny = int((y - vy) * 65535 / max(1, vh - 1))
+    move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
 
     inp_move = INPUT()
     inp_move.type = INPUT_MOUSE
-    inp_move.iu.mi = MOUSEINPUT(nx, ny, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0, None)
+    inp_move.iu.mi = MOUSEINPUT(nx, ny, 0, move_flags, 0, None)
 
     if action_type == "click":
         button = action.get("button", "left")

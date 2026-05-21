@@ -31,6 +31,10 @@ For script testing, the same automation path can be started with:
 python clicktoolm.py --auto --silent
 ```
 
+### Multi-Monitor
+
+Screen Mode uses `SendInput` with `MOUSEEVENTF_VIRTUALDESK` and the virtual desktop bounds, so dots placed on a secondary display click the correct spot. Window Mode is HWND-relative and unaffected by monitor layout.
+
 Pass `--config <path>` to override the default config location.
 
 Automation behavior:
