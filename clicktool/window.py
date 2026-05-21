@@ -175,7 +175,7 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
             r = win32gui.GetWindowRect(child_hwnd)
             if r[0] <= sx < r[2] and r[1] <= sy < r[3]:
                 area = (r[2] - r[0]) * (r[3] - r[1])
-                if area <= best_area:
+                if area < best_area:
                     target_hwnd = child_hwnd
                     best_area = area
         except Exception:

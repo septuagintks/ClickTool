@@ -3,7 +3,7 @@ import os
 import sys
 import time
 
-from clicktool.winapi import user32, sleep_until_deadline
+from clicktool.winapi import user32, kernel32, sleep_until_deadline
 from clicktool.paths import (
     get_auto_config_path, get_auto_log_path, write_auto_log,
     acquire_single_instance_mutex, release_single_instance_mutex,
@@ -167,8 +167,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _reexec_with_pythonw_if_needed(args) -> bool:
+    """Re-launch under pythonw.exe to drop the console window (GUI mode only).
+
+    Returns True (and spawns pythonw child) so main() can exit immediately.
+    Returns False when re-exec is not needed or not possible.
+    """
+    if args.auto:
+        return False
+    if getattr(sys, "frozen", False):
+        return False
+    exe = os.path.basename(sys.executable).lower()
+    if exe != "python.exe":
+        return False
+    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pythonw):
+        try:
+            kernel32.FreeConsole()
+        except (AttributeError, OSError):
+            pass
+        return False
+    import subprocess
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    subprocess.Popen(
+        [pythonw, *sys.argv],
+        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+    )
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if _reexec_with_pythonw_if_needed(args):
+        return 0
+
+    if args.auto and args.silent:
+        try:
+            kernel32.FreeConsole()
+        except (AttributeError, OSError):
+            pass
 
     mutex_handle = acquire_single_instance_mutex()
     if mutex_handle is None:

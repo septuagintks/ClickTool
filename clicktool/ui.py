@@ -1153,11 +1153,19 @@ class ClickerApp:
                 self.screen_tree.insert("", "end", values=("", "Wait", details))
 
     def _refresh_screen_list_item(self, index: int) -> None:
-        self._refresh_screen_list()
+        if not (0 <= index < len(self._screen_positions)):
+            return
         items = self.screen_tree.get_children()
-        if 0 <= index < len(items):
-            self.screen_tree.selection_set(items[index])
-            self.screen_tree.see(items[index])
+        if not (0 <= index < len(items)):
+            self._refresh_screen_list()
+            return
+        item = self._screen_positions[index]
+        item_id = items[index]
+        if is_position_action(item):
+            self.screen_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.screen_tree.set(item_id, "details", get_mouse_action_details(item))
+        else:
+            self.screen_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
     def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
@@ -1408,11 +1416,21 @@ class ClickerApp:
                 self.window_pt_tree.insert("", "end", values=("", "Wait", details))
 
     def _refresh_window_pt_item(self, index: int) -> None:
-        self._refresh_window_pt_list()
+        if not (0 <= index < len(self._window_positions)):
+            return
         items = self.window_pt_tree.get_children()
-        if 0 <= index < len(items):
-            self.window_pt_tree.selection_set(items[index])
-            self.window_pt_tree.see(items[index])
+        if not (0 <= index < len(items)):
+            self._refresh_window_pt_list()
+            return
+        item = self._window_positions[index]
+        item_id = items[index]
+        if is_position_action(item):
+            title = item.get('win_title', '') or ''
+            short = (title[:15] + '..') if len(title) > 15 else title
+            self.window_pt_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.window_pt_tree.set(item_id, "details", get_mouse_action_details(item, short))
+        else:
+            self.window_pt_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
     def clear_window_positions(self) -> None:
         for p in self._window_positions:

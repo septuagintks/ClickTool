@@ -42,6 +42,14 @@ For script testing, the same automation path can be started with:
 python clicktool.py --auto --silent
 ```
 
+### Multi-Monitor
+
+Screen Mode uses real screen coordinates via `SetCursorPos`, so dots placed on a secondary display click the correct spot. Window Mode is HWND-relative and unaffected by monitor layout.
+
+### Console window
+
+Launching with `python clicktool.py` (no `--auto`) automatically re-launches under `pythonw.exe` so the console window disappears. `--auto` keeps the console for stdout; `--auto --silent` calls `FreeConsole()` for Task Scheduler.
+
 Automation behavior:
 - Reads the saved auto config.
 - Runs without opening the Tkinter UI.
