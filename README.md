@@ -33,7 +33,7 @@ Use the GUI **Auto Config** button to save the startup configuration first. The 
 Then configure Windows Task Scheduler to start the packaged executable with:
 
 ```bash
-tool.exe --auto --silent
+ClickTool.exe --auto --silent
 ```
 
 For script testing, the same automation path can be started with:
@@ -100,10 +100,25 @@ Automation behavior:
 
 ## Build Executable
 
-You can compile this tool into a standalone executable using `nuitka`:
+You can compile this tool into a standalone executable using Nuitka:
 
 ```bash
-nuitka --standalone --onefile --windows-console-mode=disable --enable-plugin=tk-inter clicktool.py
+python -m nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --include-package=clicktool clicktool.py
 ```
 
+This produces a single `clicktool.exe` (~9.4 MB) that runs without Python or any dependencies installed.
+
 *Note: Requires `pywin32` to be installed in the build environment.*
+
+## Release
+
+| Artifact | Description |
+|----------|-------------|
+| `ClickTool.exe` | Main branch, single-file executable (Nuitka onefile) |
+| `ClickTool_m.pyz` | Minified branch, Python zipapp (requires Python, zero third-party deps) |
+
+Run the pyz with:
+
+```bash
+python ClickTool_m.pyz
+```
