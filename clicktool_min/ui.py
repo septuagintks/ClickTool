@@ -597,8 +597,18 @@ class ClickerApp:
                 if is_position_action(p) and "dot" in p: p["dot"].withdraw()
             for p in self._window_positions:
                 if is_position_action(p) and "dot" in p: p["dot"].deiconify()
-        else:
-            self._set_dots_visible(False)
+        else: # Settings — keep the last edited mode's dots visible so users
+              # can see coordinate effects while tweaking shortcuts or defaults
+            if self._active_mode == "screen":
+                for p in self._screen_positions:
+                    if is_position_action(p) and "dot" in p: p["dot"].deiconify()
+                for p in self._window_positions:
+                    if is_position_action(p) and "dot" in p: p["dot"].withdraw()
+            else:
+                for p in self._screen_positions:
+                    if is_position_action(p) and "dot" in p: p["dot"].withdraw()
+                for p in self._window_positions:
+                    if is_position_action(p) and "dot" in p: p["dot"].deiconify()
             
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
@@ -644,7 +654,7 @@ class ClickerApp:
                 else:
                     p["dot"].withdraw()
 
-        self.root.after(100, self.sync_dots_loop)
+        self.root.after(200, self.sync_dots_loop)
 
     def add_target_window(self):
         """Open a dialog to select a window from all visible windows."""
@@ -772,28 +782,30 @@ class ClickerApp:
         lb.config(yscrollcommand=scroll.set)
         
         current_windows = []
-        
+        scan_buffer: list[tuple[int, str]] = []
+
+        def enum_callback(hwnd, lparam):
+            if user32.IsWindowVisible(hwnd):
+                title = get_window_title(hwnd)
+                if title:
+                    scan_buffer.append((hwnd, title))
+            return True
+
+        enum_proc = EnumWindowsProc(enum_callback)
+
         def refresh_list():
             if not dialog.winfo_exists():
                 return
-                
+
             nonlocal current_windows
-            new_windows = []
-            def enum_callback(hwnd, lparam):
-                if user32.IsWindowVisible(hwnd):
-                    title = get_window_title(hwnd)
-                    if title:
-                        new_windows.append((hwnd, title))
-                return True
-                
-            enum_proc = EnumWindowsProc(enum_callback)
+            scan_buffer.clear()
             user32.EnumWindows(enum_proc, 0)
-            new_windows.sort(key=lambda x: x[1].lower())
-            
+            new_windows = sorted(scan_buffer, key=lambda x: x[1].lower())
+
             if new_windows != current_windows:
                 sel = lb.curselection()
                 selected_hwnd = current_windows[sel[0]][0] if sel else None
-                
+
                 lb.delete(0, "end")
                 for hwnd, title in new_windows:
                     lb.insert("end", title)

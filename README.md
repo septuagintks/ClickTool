@@ -65,7 +65,7 @@ Automation behavior:
 - **Cross-Window Sequencing**: Create sequences across multiple different windows.
 
 ### UI & UX Improvements
-- **Settings Tab**: Window-mode notes, default Interval / Wait values, and shortcut customization are grouped here.
+- **Settings Tab**: Window-mode notes, default Interval / Wait values, and shortcut customization are grouped here. Dots from the most recently used Screen / Window tab stay visible while editing settings, so coordinate adjustments and shortcut tweaks have live visual feedback.
 - **Compact Controls**: Run controls share one bottom bar to leave more room for click lists. Action buttons are grouped by add/edit tasks.
 - **Optimized Dialogs**: Window selection dialogs use a tighter layout.
 - **Bidirectional Selection**: Clicking a dot on the screen automatically selects its corresponding entry in the list.
