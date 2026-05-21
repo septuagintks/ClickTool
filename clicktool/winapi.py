@@ -39,6 +39,9 @@ MK_XBUTTON2 = 0x0040
 
 CWP_SKIPINVISIBLE = 0x0001
 
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
+
 ERROR_ALREADY_EXISTS = 183
 
 
@@ -76,6 +79,8 @@ user32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, POINT, wintypes.UINT]
 user32.ChildWindowFromPointEx.restype = wintypes.HWND
 user32.IsIconic.argtypes = [wintypes.HWND]
 user32.IsIconic.restype = wintypes.BOOL
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
 
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]

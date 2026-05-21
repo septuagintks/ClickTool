@@ -1,33 +1,5 @@
 from .winapi import user32
 
-DEFAULT_HOTKEYS = {
-    "start": "F8",
-    "stop": "Esc",
-    "add_window": "Ctrl+Shift+W",
-    "add_dot": "Ctrl+D",
-    "add_wheel": "Ctrl+Shift+D",
-    "add_wait": "Ctrl+W",
-    "clear": "Ctrl+Delete",
-}
-
-HOTKEY_ACTIONS = (
-    ("start", "Start"),
-    ("stop", "Stop"),
-    ("add_window", "Add Window"),
-    ("add_dot", "Add Dot"),
-    ("add_wheel", "Add Wheel"),
-    ("add_wait", "Add Wait"),
-    ("clear", "Clear"),
-)
-
-MODIFIER_STATE_BITS = {
-    "Shift": 0x0001,
-    "Ctrl": 0x0004,
-    "Alt": 0x0008,
-}
-
-MODIFIER_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R"}
-
 VK_MAP = {
     "ESC": 0x1B,
     "ENTER": 0x0D,
@@ -63,6 +35,32 @@ for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
 for c in "0123456789":
     VK_MAP[c] = ord(c)
 
+DEFAULT_HOTKEYS = {
+    "start": "F8",
+    "stop": "Esc",
+    "add_window": "Ctrl+Shift+W",
+    "add_dot": "Ctrl+D",
+    "add_wheel": "Ctrl+Shift+D",
+    "add_wait": "Ctrl+W",
+    "clear": "Ctrl+Delete",
+}
+
+HOTKEY_ACTIONS = (
+    ("start", "Start"),
+    ("stop", "Stop"),
+    ("add_window", "Add Window"),
+    ("add_dot", "Add Dot"),
+    ("add_wheel", "Add Wheel"),
+    ("add_wait", "Add Wait"),
+    ("clear", "Clear"),
+)
+
+MODIFIER_STATE_BITS = {
+    "Shift": 0x0001,
+    "Ctrl": 0x0004,
+    "Alt": 0x0008,
+}
+MODIFIER_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R"}
 
 
 def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
@@ -72,9 +70,9 @@ def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
     if not parts:
         return False
     modifiers_needed = {
-        "CTRL": 0x11,  # VK_CONTROL
-        "ALT": 0x12,   # VK_MENU
-        "SHIFT": 0x10, # VK_SHIFT
+        "CTRL": 0x11,
+        "ALT": 0x12,
+        "SHIFT": 0x10,
     }
     for mod_name, vk_code in modifiers_needed.items():
         is_pressed = (user32.GetAsyncKeyState(vk_code) & 0x8000) != 0
@@ -95,6 +93,7 @@ def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
         else:
             return False
     return (user32.GetAsyncKeyState(vk) & 0x8000) != 0
+
 
 def canonical_key_name(key: str) -> str:
     if len(key) == 1:

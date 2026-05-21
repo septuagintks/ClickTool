@@ -83,31 +83,6 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
     return f"Delay: {action['ms']}ms"
 
 
-def read_script_file(file_path: str) -> dict:
-    with open(file_path, "r", encoding="utf-8-sig") as f:
-        data = json.load(f)
-    normalize_script_data(data)
-    return data
-
-
-def write_script_file(file_path: str, data: dict) -> None:
-    directory = os.path.dirname(file_path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    temp_path = file_path + ".tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        os.replace(temp_path, file_path)
-    except Exception as e:
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
-        raise e
-
-
 def normalize_script_data(data: dict) -> dict:
     data["mode"] = infer_script_mode(data)
     settings = data.setdefault("settings", {})
@@ -133,3 +108,28 @@ def normalize_script_data(data: dict) -> dict:
         for action in data.get(collection_name, []):
             normalize_mouse_action(action)
     return data
+
+
+def read_script_file(file_path: str) -> dict:
+    with open(file_path, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    normalize_script_data(data)
+    return data
+
+
+def write_script_file(file_path: str, data: dict) -> None:
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    temp_path = file_path + ".tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(temp_path, file_path)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise e

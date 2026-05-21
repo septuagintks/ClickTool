@@ -6,7 +6,7 @@ import win32gui
 import win32api
 import win32con
 
-from .winapi import user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness
+from .winapi import user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN
 from .hotkey import (
     DEFAULT_HOTKEYS, HOTKEY_ACTIONS,
     is_hotkey_pressed_globally, normalize_hotkey_text, hotkey_from_event,
@@ -965,10 +965,10 @@ class ClickerApp:
             except Exception:
                 pass
         if x is None or y is None:
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
+            screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
+            screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
             x, y = screen_w // 2, screen_h // 2
-        
+
         index = len(self._screen_positions)
         dot = DraggableDot(self.root, index, x, y, self._on_screen_dot_move,
                           on_click=self._on_screen_dot_click, action_type="click")
@@ -998,8 +998,8 @@ class ClickerApp:
             except Exception:
                 pass
         if x is None or y is None:
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
+            screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
+            screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
             x, y = screen_w // 2, screen_h // 2
 
         index = len(self._screen_positions)
