@@ -1956,7 +1956,7 @@ class ClickerApp:
             for action in actions:
                 if self._stop_event.is_set():
                     break
-                
+
                 normalize_mouse_action(action)
                 action_type = action.get("type", "click")
                 if is_position_action(action):
@@ -1981,18 +1981,21 @@ class ClickerApp:
                     delay_ms = action.get("delay")
                     if delay_ms is None:
                         delay_ms = global_interval_ms
-                    
+
                     if delay_ms > 0 and self._stop_event.wait(delay_ms / 1000.0):
                         break
                 elif action_type == "wait":
                     wait_ms = action.get("ms", 0)
                     if wait_ms > 0 and self._stop_event.wait(wait_ms / 1000.0):
                         break
-            
+
             # If loop is disabled, stop after one full pass
             if not loop_enabled:
                 break
-                    
+            # Yield 1ms each round so configs with all-zero delays don't pin a CPU core
+            if self._stop_event.wait(0.001):
+                break
+
         self._safe_after(self._on_loop_exit)
 
     def _on_loop_exit(self) -> None:

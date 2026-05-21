@@ -157,6 +157,8 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         if max_rounds > 0 and rounds >= max_rounds:
             write_auto_log(log_path, "max rounds reached; exit=0")
             return 0
+        # Yield 1ms each round so configs with all-zero delays don't pin a CPU core
+        sleep_until_deadline(0.001, deadline)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
