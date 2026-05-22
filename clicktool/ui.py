@@ -9,16 +9,18 @@ import win32con
 
 from .winapi import user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN
 from .hotkey import (
-    DEFAULT_HOTKEYS, HOTKEY_ACTIONS,
+    DEFAULT_HOTKEYS, HOTKEY_ACTIONS, VK_MAP,
     is_hotkey_pressed_globally, normalize_hotkey_text, hotkey_from_event,
+    modifier_name_from_keysym, key_name_from_event, format_combo,
 )
 from .script import (
     DOT_SIZE, DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_PURE_BACKGROUND_WINDOW_CLICK,
     DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS, DEFAULT_ENABLE_GLOBAL_HOTKEYS,
-    MOUSE_BUTTONS,
+    MOUSE_BUTTONS, KEY_MODIFIERS,
     coerce_non_negative_int, infer_script_mode, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
+    format_key_combo,
     normalize_script_data, read_script_file, write_script_file,
 )
 from .window import (
@@ -26,6 +28,7 @@ from .window import (
     get_client_bounds_in_window, clamp_window_position,
     list_visible_windows,
     perform_screen_mouse_action, perform_window_mouse_action,
+    perform_screen_key_action, perform_window_key_action,
 )
 from .paths import get_auto_config_path
 
@@ -181,6 +184,15 @@ class ClickerApp:
         self._stop_event = threading.Event()
         self._click_thread: threading.Thread | None = None
         self._escape_thread: threading.Thread | None = None
+
+        # Key-capture state (active while a Key action's entry has focus)
+        self._capturing_key = False
+        self._key_capture_index: int | None = None
+        self._key_capture_mode: str = "screen"
+        self._key_pressed_keycodes: set[int] = set()
+        self._key_combo_modifiers: list[str] = []
+        self._key_combo_main_name: str = ""
+        self._key_combo_main_vk: int = 0
 
         self._build_ui()
         self._set_button_controls_enabled(False)
@@ -411,6 +423,14 @@ class ClickerApp:
         self.screen_prop_label.grid(row=0, column=0, sticky="w")
         self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=15)
         self.screen_step_delay_entry.grid(row=0, column=1, padx=4)
+        self.screen_key_entry = ttk.Entry(prop_frame, width=24)
+        self.screen_key_entry.configure(state="readonly")
+        self.screen_key_entry.grid(row=0, column=1, padx=4)
+        self.screen_key_entry.grid_remove()
+        self.screen_key_entry.bind("<KeyPress>", self._on_key_capture_press)
+        self.screen_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
+        self.screen_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("screen"))
+        self.screen_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
         ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
         ttk.Label(prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.screen_button_combo = ttk.Combobox(
@@ -430,7 +450,7 @@ class ClickerApp:
 
         ttk.Label(
             prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
@@ -442,6 +462,7 @@ class ClickerApp:
         add_group.pack(side="left", padx=(0, 8))
         ttk.Button(add_group, text="Dot", command=self.add_screen_dot, width=9).pack(side="left", padx=(0, 4))
         ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Key", command=self.add_screen_key, width=9).pack(side="left", padx=(0, 4))
         ttk.Button(add_group, text="Wait", command=self.add_screen_wait, width=9).pack(side="left")
 
         edit_group = ttk.LabelFrame(action_bar, text="Edit", padding=(6, 4))
@@ -524,6 +545,7 @@ class ClickerApp:
         add_group.pack(side="left", padx=(0, 8))
         ttk.Button(add_group, text="Dot", command=self.add_window_dot, width=9).pack(side="left", padx=(0, 4))
         ttk.Button(add_group, text="Wheel", command=self.add_window_wheel, width=9).pack(side="left", padx=(0, 4))
+        ttk.Button(add_group, text="Key", command=self.add_window_key, width=9).pack(side="left", padx=(0, 4))
         ttk.Button(add_group, text="Wait", command=self.add_window_wait, width=9).pack(side="left")
 
         edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
@@ -542,6 +564,14 @@ class ClickerApp:
         self.window_prop_label.grid(row=0, column=0, sticky="w")
         self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=15)
         self.window_step_delay_entry.grid(row=0, column=1, padx=4)
+        self.window_key_entry = ttk.Entry(win_prop_frame, width=24)
+        self.window_key_entry.configure(state="readonly")
+        self.window_key_entry.grid(row=0, column=1, padx=4)
+        self.window_key_entry.grid_remove()
+        self.window_key_entry.bind("<KeyPress>", self._on_key_capture_press)
+        self.window_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
+        self.window_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("window"))
+        self.window_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
         ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
         ttk.Label(win_prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.window_button_combo = ttk.Combobox(
@@ -561,7 +591,7 @@ class ClickerApp:
 
         ttk.Label(
             win_prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
@@ -703,6 +733,8 @@ class ClickerApp:
         return True
 
     def _on_key_press(self, event) -> str | None:
+        if self._capturing_key:
+            return None
         hotkey = hotkey_from_event(event)
         action = self._hotkey_map.get(hotkey)
         if not action:
@@ -725,6 +757,8 @@ class ClickerApp:
             self.add_current_wheel()
         elif action == "add_wait":
             self.add_current_wait()
+        elif action == "add_key":
+            self.add_current_key()
         elif action == "clear":
             self.clear_current_positions()
         else:
@@ -754,6 +788,14 @@ class ClickerApp:
         else:
             self.notebook.select(0)
             self.add_screen_wait()
+
+    def add_current_key(self) -> None:
+        if self._active_mode == "window":
+            self.notebook.select(1)
+            self.add_window_key()
+        else:
+            self.notebook.select(0)
+            self.add_screen_key()
 
     def clear_current_positions(self) -> None:
         if self._active_mode == "window":
@@ -1074,6 +1116,25 @@ class ClickerApp:
         self._on_screen_list_select()
         self.status_var.set(f"Added {wait_ms}ms wait.")
 
+    def add_screen_key(self) -> None:
+        """Add an empty key action to the screen list and focus the capture entry."""
+        self._screen_positions.append({
+            "type": "key",
+            "vk": 0,
+            "key_name": "",
+            "modifiers": [],
+            "delay": None,
+        })
+        self._refresh_screen_list()
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
+        self._on_screen_list_select()
+        self.notebook.select(0)
+        self._show_screen_key_entry(True)
+        self.screen_key_entry.focus_set()
+        self.status_var.set("Press the key combo to record it (release all keys to finish).")
+
     def _on_screen_dot_click(self, index):
         """Select corresponding item in tree when dot is clicked."""
         self.notebook.select(0)
@@ -1097,6 +1158,7 @@ class ClickerApp:
         index = self.screen_tree.index(sel[0])
         pos = self._screen_positions[index]
         if pos["type"] == "click":
+            self._show_screen_key_entry(False)
             self.screen_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
@@ -1104,12 +1166,21 @@ class ClickerApp:
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
+            self._show_screen_key_entry(False)
             self.screen_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
+        elif pos["type"] == "key":
+            self._show_screen_key_entry(True)
+            self.screen_prop_label.config(text="Key combo:")
+            self._refresh_key_entry_text("screen", pos)
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.screen_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(False)
         else:
+            self._show_screen_key_entry(False)
             self.screen_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
@@ -1160,6 +1231,12 @@ class ClickerApp:
                     "end",
                     values=(dot_count, get_mouse_action_name(item), get_mouse_action_details(item)),
                 )
+            elif item.get("type") == "key":
+                self.screen_tree.insert(
+                    "",
+                    "end",
+                    values=("", get_mouse_action_name(item), get_mouse_action_details(item)),
+                )
             else:
                 details = f"Delay: {item['ms']}ms"
                 self.screen_tree.insert("", "end", values=("", "Wait", details))
@@ -1174,6 +1251,9 @@ class ClickerApp:
         item = self._screen_positions[index]
         item_id = items[index]
         if is_position_action(item):
+            self.screen_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.screen_tree.set(item_id, "details", get_mouse_action_details(item))
+        elif item.get("type") == "key":
             self.screen_tree.set(item_id, "type", get_mouse_action_name(item))
             self.screen_tree.set(item_id, "details", get_mouse_action_details(item))
         else:
@@ -1339,6 +1419,36 @@ class ClickerApp:
         self._on_window_list_select()
         self.status_var.set(f"Added {wait_ms}ms wait.")
 
+    def add_window_key(self) -> None:
+        """Add an empty key action targeting the selected window and focus the capture entry."""
+        sel_win = self.target_win_list.curselection()
+        win_data = self._target_windows[sel_win[0]] if sel_win else None
+        self._window_positions.append({
+            "type": "key",
+            "vk": 0,
+            "key_name": "",
+            "modifiers": [],
+            "delay": None,
+            "hwnd": win_data["hwnd"] if win_data else None,
+            "win_title": win_data["title"] if win_data else "",
+        })
+        self._refresh_window_pt_list()
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
+        self._on_window_list_select()
+        self.notebook.select(1)
+        self._show_window_key_entry(True)
+        self.window_key_entry.focus_set()
+        if win_data:
+            self.status_var.set(
+                f"Press the key combo for '{win_data['title']}' (release all keys to finish)."
+            )
+        else:
+            self.status_var.set(
+                "Press the key combo (no target window selected — combo will be added without a window)."
+            )
+
     def _on_window_dot_click(self, index):
         """Select corresponding item in tree when dot is clicked."""
         self.notebook.select(1)
@@ -1362,6 +1472,7 @@ class ClickerApp:
         index = self.window_pt_tree.index(sel[0])
         pos = self._window_positions[index]
         if pos["type"] == "click":
+            self._show_window_key_entry(False)
             self.window_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
@@ -1369,12 +1480,21 @@ class ClickerApp:
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
+            self._show_window_key_entry(False)
             self.window_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
+        elif pos["type"] == "key":
+            self._show_window_key_entry(True)
+            self.window_prop_label.config(text="Key combo:")
+            self._refresh_key_entry_text("window", pos)
+            self.custom_delay_var.set(str(pos.get("delay") or ""))
+            self.window_custom_delay_entry.config(state="normal")
+            self._set_button_controls_enabled(False)
         else:
+            self._show_window_key_entry(False)
             self.window_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
@@ -1423,6 +1543,11 @@ class ClickerApp:
                 title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
                 details = get_mouse_action_details(item, title)
                 self.window_pt_tree.insert("", "end", values=(dot_count, get_mouse_action_name(item), details))
+            elif item.get("type") == "key":
+                raw_title = item.get('win_title') or ''
+                title = (raw_title[:15] + '..') if len(raw_title) > 15 else raw_title
+                details = get_mouse_action_details(item, title)
+                self.window_pt_tree.insert("", "end", values=("", get_mouse_action_name(item), details))
             else:
                 details = f"Delay: {item['ms']}ms"
                 self.window_pt_tree.insert("", "end", values=("", "Wait", details))
@@ -1441,6 +1566,11 @@ class ClickerApp:
             short = (title[:15] + '..') if len(title) > 15 else title
             self.window_pt_tree.set(item_id, "type", get_mouse_action_name(item))
             self.window_pt_tree.set(item_id, "details", get_mouse_action_details(item, short))
+        elif item.get("type") == "key":
+            title = item.get('win_title', '') or ''
+            short = (title[:15] + '..') if len(title) > 15 else title
+            self.window_pt_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.window_pt_tree.set(item_id, "details", get_mouse_action_details(item, short))
         else:
             self.window_pt_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
@@ -1450,6 +1580,144 @@ class ClickerApp:
                 p["dot"].destroy()
         self._window_positions.clear()
         self._refresh_window_pt_list()
+
+    # ------------------------------------------------------------------ #
+    # Key capture (Add Key)
+    # ------------------------------------------------------------------ #
+
+    def _show_screen_key_entry(self, show: bool) -> None:
+        if show:
+            self.screen_step_delay_entry.grid_remove()
+            self.screen_key_entry.grid()
+        else:
+            self.screen_key_entry.grid_remove()
+            self.screen_step_delay_entry.grid()
+
+    def _show_window_key_entry(self, show: bool) -> None:
+        if show:
+            self.window_step_delay_entry.grid_remove()
+            self.window_key_entry.grid()
+        else:
+            self.window_key_entry.grid_remove()
+            self.window_step_delay_entry.grid()
+
+    def _key_entry_for_mode(self, mode: str) -> ttk.Entry:
+        return self.screen_key_entry if mode == "screen" else self.window_key_entry
+
+    def _set_key_entry_text(self, mode: str, text: str) -> None:
+        entry = self._key_entry_for_mode(mode)
+        entry.configure(state="normal")
+        entry.delete(0, tk.END)
+        if text:
+            entry.insert(0, text)
+        entry.configure(state="readonly")
+
+    def _refresh_key_entry_text(self, mode: str, action: dict) -> None:
+        text = format_key_combo(action) or "(press a key)"
+        self._set_key_entry_text(mode, text)
+
+    def _begin_key_capture(self, mode: str) -> None:
+        tree = self.screen_tree if mode == "screen" else self.window_pt_tree
+        positions = self._screen_positions if mode == "screen" else self._window_positions
+        sel = tree.selection()
+        if not sel:
+            self._capturing_key = False
+            self._key_capture_index = None
+            return
+        index = tree.index(sel[0])
+        if not (0 <= index < len(positions)) or positions[index].get("type") != "key":
+            self._capturing_key = False
+            self._key_capture_index = None
+            return
+        self._capturing_key = True
+        self._key_capture_mode = mode
+        self._key_capture_index = index
+        self._reset_key_combo_state()
+        self._set_key_entry_text(mode, "press the combo, then release all keys")
+
+    def _end_key_capture(self) -> None:
+        self._capturing_key = False
+        self._key_capture_index = None
+        self._reset_key_combo_state()
+
+    def _reset_key_combo_state(self) -> None:
+        self._key_pressed_keycodes.clear()
+        self._key_combo_modifiers = []
+        self._key_combo_main_name = ""
+        self._key_combo_main_vk = 0
+
+    def _on_key_capture_press(self, event):
+        if not self._capturing_key:
+            return "break"
+        self._key_pressed_keycodes.add(event.keycode)
+        modifier = modifier_name_from_keysym(event.keysym)
+        if modifier:
+            if modifier not in self._key_combo_modifiers:
+                self._key_combo_modifiers.append(modifier)
+        else:
+            if not self._key_combo_main_name:
+                self._key_combo_main_name = key_name_from_event(event)
+                self._key_combo_main_vk = self._lookup_vk(self._key_combo_main_name, event.keycode)
+        # Live preview: show what will be committed.
+        preview_mods = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
+        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only — press a main key)"
+        self._set_key_entry_text(self._key_capture_mode, preview_text)
+        return "break"
+
+    def _on_key_capture_release(self, event):
+        if not self._capturing_key:
+            return "break"
+        self._key_pressed_keycodes.discard(event.keycode)
+        if self._key_pressed_keycodes:
+            return "break"
+        # All keys are up — commit if we captured a main key.
+        if self._key_combo_main_name and self._key_capture_index is not None:
+            self._commit_key_combo()
+        else:
+            # Nothing committed; reset to the existing action's value.
+            self._refresh_capture_target_entry()
+        self._reset_key_combo_state()
+        return "break"
+
+    def _refresh_capture_target_entry(self) -> None:
+        if self._key_capture_index is None:
+            return
+        positions = self._screen_positions if self._key_capture_mode == "screen" else self._window_positions
+        if not (0 <= self._key_capture_index < len(positions)):
+            return
+        action = positions[self._key_capture_index]
+        if action.get("type") != "key":
+            return
+        self._refresh_key_entry_text(self._key_capture_mode, action)
+
+    def _commit_key_combo(self) -> None:
+        positions = self._screen_positions if self._key_capture_mode == "screen" else self._window_positions
+        index = self._key_capture_index
+        if index is None or not (0 <= index < len(positions)):
+            return
+        action = positions[index]
+        if action.get("type") != "key":
+            return
+        action["modifiers"] = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
+        action["key_name"] = self._key_combo_main_name
+        action["vk"] = self._key_combo_main_vk
+        if self._key_capture_mode == "screen":
+            self._refresh_screen_list_item(index)
+        else:
+            self._refresh_window_pt_item(index)
+        self._refresh_key_entry_text(self._key_capture_mode, action)
+        self.status_var.set(f"Captured key: {format_key_combo(action)}")
+
+    def _lookup_vk(self, key_name: str, fallback_keycode: int) -> int:
+        if not key_name:
+            return fallback_keycode or 0
+        upper = key_name.upper()
+        vk = VK_MAP.get(upper)
+        if vk is not None:
+            return vk
+        if len(key_name) == 1:
+            return ord(upper)
+        return fallback_keycode or 0
 
     def apply_step_delay(self):
         """Save the custom delay for the selected position in either mode."""
@@ -1486,6 +1754,8 @@ class ClickerApp:
                 pass # Can't clear pos via delay entry easily
             elif positions[index]["type"] == "wheel":
                 pass
+            elif positions[index]["type"] == "key":
+                positions[index]["delay"] = custom_delay
             else:
                 positions[index]["ms"] = 0
         else:
@@ -1511,6 +1781,8 @@ class ClickerApp:
                         positions[index]["delta"] = coerce_wheel_delta(parts[2], -1)
                     else:
                         raise ValueError
+                    positions[index]["delay"] = custom_delay
+                elif positions[index]["type"] == "key":
                     positions[index]["delay"] = custom_delay
                 else:
                     ms = int(val)
@@ -1559,6 +1831,14 @@ class ClickerApp:
                     "x": action.get("x"),
                     "y": action.get("y"),
                     "delta": coerce_wheel_delta(action.get("delta"), -1),
+                    "delay": action.get("delay"),
+                }
+            elif action_type == "key":
+                data = {
+                    "type": "key",
+                    "vk": action.get("vk", 0),
+                    "key_name": action.get("key_name", ""),
+                    "modifiers": list(action.get("modifiers") or []),
                     "delay": action.get("delay"),
                 }
             else:
@@ -1642,6 +1922,14 @@ class ClickerApp:
                 else:
                     action["delta"] = coerce_wheel_delta(p_data.get("delta"), -1)
                 self._screen_positions.append(action)
+            elif p_data.get("type") == "key":
+                self._screen_positions.append({
+                    "type": "key",
+                    "vk": p_data.get("vk", 0),
+                    "key_name": p_data.get("key_name", ""),
+                    "modifiers": list(p_data.get("modifiers") or []),
+                    "delay": p_data.get("delay"),
+                })
             else:
                 self._screen_positions.append({
                     "type": "wait",
@@ -1691,6 +1979,18 @@ class ClickerApp:
                 else:
                     action["delta"] = coerce_wheel_delta(p_data.get("delta"), -1)
                 self._window_positions.append(action)
+            elif p_data.get("type") == "key":
+                win_title = p_data.get("win_title", "") or ""
+                found_hwnd = next((w["hwnd"] for w in self._target_windows if w["title"] == win_title), None) if win_title else None
+                self._window_positions.append({
+                    "type": "key",
+                    "vk": p_data.get("vk", 0),
+                    "key_name": p_data.get("key_name", ""),
+                    "modifiers": list(p_data.get("modifiers") or []),
+                    "delay": p_data.get("delay"),
+                    "hwnd": found_hwnd,
+                    "win_title": win_title,
+                })
             else:
                 self._window_positions.append({
                     "type": "wait",
@@ -1922,6 +2222,8 @@ class ClickerApp:
         debounce_seconds = 0.4
         while True:
             time.sleep(0.03)
+            if self._capturing_key:
+                continue
             if not self.enable_global_hotkeys_var.get():
                 continue
             try:
@@ -1994,6 +2296,30 @@ class ClickerApp:
                     if delay_ms is None:
                         delay_ms = global_interval_ms
 
+                    if delay_ms > 0 and self._stop_event.wait(delay_ms / 1000.0):
+                        break
+                elif action_type == "key":
+                    if mode == "window":
+                        hwnd = action.get("hwnd")
+                        if not hwnd or not user32.IsWindow(hwnd):
+                            active_windows = list_visible_windows()
+                            title = action.get("win_title")
+                            found_hwnd = next((h for h, t in active_windows if t == title), None)
+                            if not found_hwnd and title:
+                                found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                            if found_hwnd:
+                                hwnd = found_hwnd
+                                action["hwnd"] = hwnd
+                                self._safe_after(self._update_hwnd_from_thread, title, hwnd)
+                        if hwnd and user32.IsWindow(hwnd):
+                            perform_window_key_action(hwnd, action)
+                        else:
+                            perform_screen_key_action(action)
+                    else:
+                        perform_screen_key_action(action)
+                    delay_ms = action.get("delay")
+                    if delay_ms is None:
+                        delay_ms = global_interval_ms
                     if delay_ms > 0 and self._stop_event.wait(delay_ms / 1000.0):
                         break
                 elif action_type == "wait":

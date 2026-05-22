@@ -42,6 +42,7 @@ DEFAULT_HOTKEYS = {
     "add_dot": "Ctrl+D",
     "add_wheel": "Ctrl+Shift+D",
     "add_wait": "Ctrl+W",
+    "add_key": "Ctrl+K",
     "clear": "Ctrl+Delete",
 }
 
@@ -52,6 +53,7 @@ HOTKEY_ACTIONS = (
     ("add_dot", "Add Dot"),
     ("add_wheel", "Add Wheel"),
     ("add_wait", "Add Wait"),
+    ("add_key", "Add Key"),
     ("clear", "Clear"),
 )
 
@@ -60,7 +62,25 @@ MODIFIER_STATE_BITS = {
     "Ctrl": 0x0004,
     "Alt": 0x0008,
 }
-MODIFIER_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R"}
+MODIFIER_KEYS = {
+    "Shift_L", "Shift_R",
+    "Control_L", "Control_R",
+    "Alt_L", "Alt_R",
+    "Meta_L", "Meta_R",
+    "Super_L", "Super_R",
+    "Win_L", "Win_R",
+}
+MODIFIER_VK_BY_NAME = {
+    "Ctrl": (0x11,),
+    "Alt": (0x12,),
+    "Shift": (0x10,),
+    "Win": (0x5B, 0x5C),
+}
+MODIFIER_ORDER = ("Ctrl", "Alt", "Shift", "Win")
+
+
+def _is_modifier_pressed(name: str) -> bool:
+    return any((user32.GetAsyncKeyState(vk) & 0x8000) != 0 for vk in MODIFIER_VK_BY_NAME[name])
 
 
 def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
@@ -69,20 +89,16 @@ def is_hotkey_pressed_globally(hotkey_str: str) -> bool:
     parts = [p.strip().upper() for p in hotkey_str.split("+") if p.strip()]
     if not parts:
         return False
-    modifiers_needed = {
-        "CTRL": 0x11,
-        "ALT": 0x12,
-        "SHIFT": 0x10,
-    }
-    for mod_name, vk_code in modifiers_needed.items():
-        is_pressed = (user32.GetAsyncKeyState(vk_code) & 0x8000) != 0
-        if mod_name in parts:
+    needed = {name.upper() for name in MODIFIER_VK_BY_NAME}
+    for name in MODIFIER_VK_BY_NAME:
+        is_pressed = _is_modifier_pressed(name)
+        if name.upper() in parts:
             if not is_pressed:
                 return False
         else:
             if is_pressed:
                 return False
-    main_keys = [p for p in parts if p not in modifiers_needed]
+    main_keys = [p for p in parts if p not in needed]
     if not main_keys:
         return False
     main_key_str = main_keys[0]
@@ -119,6 +135,9 @@ def normalize_hotkey_text(value) -> str:
         "shift": "Shift",
         "alt": "Alt",
         "option": "Alt",
+        "win": "Win",
+        "super": "Win",
+        "meta": "Win",
         "escape": "Esc",
         "esc": "Esc",
         "return": "Enter",
@@ -133,7 +152,7 @@ def normalize_hotkey_text(value) -> str:
     key = ""
     for part in parts:
         mapped = aliases.get(part.lower())
-        if mapped in MODIFIER_STATE_BITS:
+        if mapped in MODIFIER_VK_BY_NAME:
             if mapped not in modifiers:
                 modifiers.append(mapped)
         else:
@@ -141,7 +160,7 @@ def normalize_hotkey_text(value) -> str:
 
     if not key:
         return ""
-    ordered_modifiers = [name for name in ("Ctrl", "Alt", "Shift") if name in modifiers]
+    ordered_modifiers = [name for name in MODIFIER_ORDER if name in modifiers]
     return "+".join([*ordered_modifiers, key])
 
 
@@ -153,9 +172,39 @@ def hotkey_from_event(event) -> str:
         "Return": "Enter",
         "space": "Space",
     }.get(event.keysym, canonical_key_name(event.keysym))
-    modifiers = [
+    modifiers: list[str] = [
         name
         for name in ("Ctrl", "Alt", "Shift")
         if event.state & MODIFIER_STATE_BITS[name]
     ]
-    return "+".join([*modifiers, key])
+    if _is_modifier_pressed("Win"):
+        modifiers.append("Win")
+    ordered = [name for name in MODIFIER_ORDER if name in modifiers]
+    return "+".join([*ordered, key])
+
+
+def modifier_name_from_keysym(keysym: str) -> str | None:
+    if keysym in ("Control_L", "Control_R"):
+        return "Ctrl"
+    if keysym in ("Alt_L", "Alt_R"):
+        return "Alt"
+    if keysym in ("Shift_L", "Shift_R"):
+        return "Shift"
+    if keysym in ("Super_L", "Super_R", "Win_L", "Win_R", "Meta_L", "Meta_R"):
+        return "Win"
+    return None
+
+
+def key_name_from_event(event) -> str:
+    return {
+        "Escape": "Esc",
+        "Return": "Enter",
+        "space": "Space",
+    }.get(event.keysym, canonical_key_name(event.keysym))
+
+
+def format_combo(modifiers: list[str], key_name: str) -> str:
+    if not key_name:
+        return ""
+    ordered = [name for name in MODIFIER_ORDER if name in modifiers]
+    return "+".join([*ordered, key_name])
