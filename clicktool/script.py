@@ -77,6 +77,8 @@ def normalize_mouse_action(action: dict) -> dict:
         action["ms"] = coerce_non_negative_int(action.get("ms"), 0)
     elif action_type == "key":
         action["vk"] = coerce_int_or(action.get("vk"), 0)
+        action["scan_code"] = coerce_int_or(action.get("scan_code"), 0)
+        action["extended"] = bool(action.get("extended", False))
         action["key_name"] = str(action.get("key_name") or "")
         raw_mods = action.get("modifiers") or []
         if isinstance(raw_mods, str):
@@ -89,6 +91,9 @@ def normalize_mouse_action(action: dict) -> dict:
                 seen.add(name)
                 normalized_mods.append(name)
         action["modifiers"] = [name for name in KEY_MODIFIERS if name in seen]
+        action["mod_scans"] = action.get("mod_scans") or {}
+        if not isinstance(action["mod_scans"], dict):
+            action["mod_scans"] = {}
         action["delay"] = coerce_optional_non_negative_int(action.get("delay"))
     return action
 

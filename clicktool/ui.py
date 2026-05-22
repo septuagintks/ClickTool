@@ -10,7 +10,8 @@ import win32con
 
 from .winapi import (
     user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
-    KBDLLHOOKSTRUCT, LowLevelKeyboardProc, WH_KEYBOARD_LL, HC_ACTION, LLKHF_UP,
+    KBDLLHOOKSTRUCT, LowLevelKeyboardProc, WH_KEYBOARD_LL, HC_ACTION,
+    LLKHF_UP, LLKHF_EXTENDED,
 )
 from .hotkey import (
     DEFAULT_HOTKEYS, HOTKEY_ACTIONS, VK_MAP,
@@ -197,6 +198,9 @@ class ClickerApp:
         self._key_combo_modifiers: list[str] = []
         self._key_combo_main_name: str = ""
         self._key_combo_main_vk: int = 0
+        self._key_combo_main_scan: int = 0
+        self._key_combo_main_extended: bool = False
+        self._key_combo_mod_scans: dict[str, int] = {}
         self._kb_hook_handle = None
         self._kb_hook_proc = None
 
@@ -269,29 +273,12 @@ class ClickerApp:
 
     def _build_ui(self) -> None:
         self._apply_ui_theme()
-        # Notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True)
-        
-        # Screen Mode Tab
-        self.screen_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.screen_frame, text="Screen Mode")
-        self._build_screen_mode_ui(self.screen_frame)
 
-        # Window Mode Tab
-        self.window_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.window_frame, text="Window Mode")
-        self._build_window_mode_ui(self.window_frame)
-
-        self.settings_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.settings_frame, text="Settings")
-        self._build_settings_ui(self.settings_frame)
-
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-
-        # Global Run controls and Status
+        # Global Run controls and Status — packed FIRST at the bottom so
+        # they survive when the user shrinks the window. The notebook above
+        # is the only widget that gets clipped.
         bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
-        bottom_frame.pack(fill="x")
+        bottom_frame.pack(side="bottom", fill="x")
         bottom_frame.columnconfigure(1, weight=1)
 
         run_frame = ttk.Frame(bottom_frame)
@@ -313,6 +300,27 @@ class ClickerApp:
         ttk.Label(bottom_frame, textvariable=self.status_var, foreground="#005a9e", font=("", 9, "bold")).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
         )
+
+        # Notebook for tabs (packed AFTER bottom_frame so it lives above and
+        # is the first widget the geometry manager clips when shrinking).
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(side="top", fill="both", expand=True)
+
+        # Screen Mode Tab
+        self.screen_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.screen_frame, text="Screen Mode")
+        self._build_screen_mode_ui(self.screen_frame)
+
+        # Window Mode Tab
+        self.window_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.window_frame, text="Window Mode")
+        self._build_window_mode_ui(self.window_frame)
+
+        self.settings_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.settings_frame, text="Settings")
+        self._build_settings_ui(self.settings_frame)
+
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _build_settings_ui(self, frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -423,24 +431,26 @@ class ClickerApp:
         # Row 3: Selected Item Properties
         prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
         prop_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        prop_frame.columnconfigure(3, weight=1)
-        prop_frame.columnconfigure(0, minsize=110)
-        prop_frame.columnconfigure(1, minsize=190)
-        prop_frame.columnconfigure(2, minsize=120)
+        prop_frame.columnconfigure(0, minsize=96)
+        prop_frame.columnconfigure(4, weight=1)
 
         self.screen_prop_label = ttk.Label(prop_frame, text="Value:", anchor="w")
-        self.screen_prop_label.grid(row=0, column=0, sticky="ew")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=22)
-        self.screen_step_delay_entry.grid(row=0, column=1, padx=4, sticky="w")
-        self.screen_key_entry = ttk.Entry(prop_frame, width=22)
+        self.screen_prop_label.grid(row=0, column=0, sticky="w")
+        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=14)
+        self.screen_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.screen_key_entry = ttk.Entry(prop_frame, width=14)
         self.screen_key_entry.configure(state="readonly")
-        self.screen_key_entry.grid(row=0, column=1, padx=4, sticky="w")
+        self.screen_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
         self.screen_key_entry.grid_remove()
         self.screen_key_entry.bind("<KeyPress>", self._on_key_capture_press)
         self.screen_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
         self.screen_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("screen"))
         self.screen_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
-        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=2, sticky="w")
+        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=10)
+        self.screen_custom_delay_entry.grid(row=0, column=3, sticky="w")
+        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=5, sticky="e")
+
         self.screen_button_label = ttk.Label(prop_frame, text="Button:")
         self.screen_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.screen_button_combo = ttk.Combobox(
@@ -454,16 +464,12 @@ class ClickerApp:
         self.screen_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.screen_button_combo)
 
-        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
-        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=12)
-        self.screen_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
-
         ttk.Label(
             prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
+            text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=4, sticky="w")
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
         # Row 4: Controls — Add row, Edit row below
         action_bar = ttk.Frame(frame)
@@ -494,12 +500,18 @@ class ClickerApp:
         paned.grid(row=0, column=0, sticky="nsew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
+        self._win_paned = paned
+        self._win_pane_min_left = 180
+        self._win_pane_min_right = 380
+        paned.bind("<B1-Motion>", self._clamp_paned_sash)
+        paned.bind("<ButtonRelease-1>", self._clamp_paned_sash)
+        paned.bind("<Configure>", self._clamp_paned_sash)
 
         # Left: Window Column
         win_frame = ttk.Frame(paned, padding=(0, 0, 8, 0))
         paned.add(win_frame, weight=1)
         try:
-            paned.paneconfigure(win_frame, minsize=180)
+            paned.paneconfigure(win_frame, minsize=self._win_pane_min_left)
         except tk.TclError:
             pass
         
@@ -538,7 +550,7 @@ class ClickerApp:
         pt_frame = ttk.Frame(paned, padding=(8, 0, 0, 0))
         paned.add(pt_frame, weight=2)
         try:
-            paned.paneconfigure(pt_frame, minsize=380)
+            paned.paneconfigure(pt_frame, minsize=self._win_pane_min_right)
         except tk.TclError:
             pass
         
@@ -547,24 +559,26 @@ class ClickerApp:
         # Selected Item Properties (packed bottom first so it survives shrinking).
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
         win_prop_frame.pack(side="bottom", fill="x", pady=(8, 0))
-        win_prop_frame.columnconfigure(3, weight=1)
-        win_prop_frame.columnconfigure(0, minsize=110)
-        win_prop_frame.columnconfigure(1, minsize=190)
-        win_prop_frame.columnconfigure(2, minsize=120)
+        win_prop_frame.columnconfigure(0, minsize=96)
+        win_prop_frame.columnconfigure(4, weight=1)
 
         self.window_prop_label = ttk.Label(win_prop_frame, text="Value:", anchor="w")
-        self.window_prop_label.grid(row=0, column=0, sticky="ew")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=22)
-        self.window_step_delay_entry.grid(row=0, column=1, padx=4, sticky="w")
-        self.window_key_entry = ttk.Entry(win_prop_frame, width=22)
+        self.window_prop_label.grid(row=0, column=0, sticky="w")
+        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=14)
+        self.window_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.window_key_entry = ttk.Entry(win_prop_frame, width=14)
         self.window_key_entry.configure(state="readonly")
-        self.window_key_entry.grid(row=0, column=1, padx=4, sticky="w")
+        self.window_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
         self.window_key_entry.grid_remove()
         self.window_key_entry.bind("<KeyPress>", self._on_key_capture_press)
         self.window_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
         self.window_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("window"))
         self.window_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
-        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=2, sticky="w")
+        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=10)
+        self.window_custom_delay_entry.grid(row=0, column=3, sticky="w")
+        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=5, sticky="e")
+
         self.window_button_label = ttk.Label(win_prop_frame, text="Button:")
         self.window_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.window_button_combo = ttk.Combobox(
@@ -578,16 +592,12 @@ class ClickerApp:
         self.window_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.window_button_combo)
 
-        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
-        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=12)
-        self.window_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
-
         ttk.Label(
             win_prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
+            text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=4, sticky="w")
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
         # Add/Edit button rows (packed bottom-up too).
         pt_btn_row = ttk.Frame(pt_frame)
@@ -1159,6 +1169,9 @@ class ClickerApp:
             "vk": 0,
             "key_name": "",
             "modifiers": [],
+            "scan_code": 0,
+            "extended": False,
+            "mod_scans": {},
             "delay": None,
         })
         self._refresh_screen_list()
@@ -1186,6 +1199,23 @@ class ClickerApp:
         self._screen_positions[index]["y"] = y
         self._refresh_screen_list_item(index)
 
+    def _clamp_paned_sash(self, event=None) -> None:
+        paned = getattr(self, "_win_paned", None)
+        if paned is None:
+            return
+        try:
+            total = paned.winfo_width()
+            if total <= 1:
+                return
+            current = paned.sashpos(0)
+            min_left = self._win_pane_min_left
+            max_left = max(min_left, total - self._win_pane_min_right)
+            clamped = max(min_left, min(current, max_left))
+            if clamped != current:
+                paned.sashpos(0, clamped)
+        except (tk.TclError, AttributeError):
+            pass
+
     def _show_screen_button_row(self, show: bool) -> None:
         if show:
             self.screen_button_label.grid()
@@ -1212,7 +1242,7 @@ class ClickerApp:
         if pos["type"] == "click":
             self._show_screen_key_entry(False)
             self._show_screen_button_row(True)
-            self.screen_prop_label.config(text="Pos (x,y):")
+            self.screen_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1221,7 +1251,7 @@ class ClickerApp:
         elif pos["type"] == "wheel":
             self._show_screen_key_entry(False)
             self._show_screen_button_row(False)
-            self.screen_prop_label.config(text="Wheel (x,y,delta):")
+            self.screen_prop_label.config(text="Wheel:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
@@ -1229,7 +1259,7 @@ class ClickerApp:
         elif pos["type"] == "key":
             self._show_screen_key_entry(True)
             self._show_screen_button_row(False)
-            self.screen_prop_label.config(text="Key combo:")
+            self.screen_prop_label.config(text="Key:")
             self._refresh_key_entry_text("screen", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
@@ -1237,7 +1267,7 @@ class ClickerApp:
         else:
             self._show_screen_key_entry(False)
             self._show_screen_button_row(False)
-            self.screen_prop_label.config(text="Wait (ms):")
+            self.screen_prop_label.config(text="Wait:")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.screen_custom_delay_entry.config(state="disabled")
@@ -1490,6 +1520,9 @@ class ClickerApp:
             "vk": 0,
             "key_name": "",
             "modifiers": [],
+            "scan_code": 0,
+            "extended": False,
+            "mod_scans": {},
             "delay": None,
             "hwnd": win_data["hwnd"],
             "win_title": win_data["title"],
@@ -1531,7 +1564,7 @@ class ClickerApp:
         if pos["type"] == "click":
             self._show_window_key_entry(False)
             self._show_window_button_row(True)
-            self.window_prop_label.config(text="Pos (x,y):")
+            self.window_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1540,7 +1573,7 @@ class ClickerApp:
         elif pos["type"] == "wheel":
             self._show_window_key_entry(False)
             self._show_window_button_row(False)
-            self.window_prop_label.config(text="Wheel (x,y,delta):")
+            self.window_prop_label.config(text="Wheel:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
@@ -1548,7 +1581,7 @@ class ClickerApp:
         elif pos["type"] == "key":
             self._show_window_key_entry(True)
             self._show_window_button_row(False)
-            self.window_prop_label.config(text="Key combo:")
+            self.window_prop_label.config(text="Key:")
             self._refresh_key_entry_text("window", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
@@ -1556,7 +1589,7 @@ class ClickerApp:
         else:
             self._show_window_key_entry(False)
             self._show_window_button_row(False)
-            self.window_prop_label.config(text="Wait (ms):")
+            self.window_prop_label.config(text="Wait:")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.window_custom_delay_entry.config(state="disabled")
@@ -1712,10 +1745,12 @@ class ClickerApp:
                 if nCode == HC_ACTION:
                     info = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT))[0]
                     is_up = bool(info.flags & LLKHF_UP)
+                    is_extended = bool(info.flags & LLKHF_EXTENDED)
                     vk = int(info.vkCode)
+                    scan = int(info.scanCode)
                     # Marshal into the Tk thread; swallow the key so the OS
                     # doesn't act on Win+R, Win+E, Alt+Tab, etc.
-                    self._safe_after(self._on_low_level_key, vk, is_up)
+                    self._safe_after(self._on_low_level_key, vk, is_up, scan, is_extended)
                     return 1  # non-zero == handled/suppressed
             except Exception:
                 pass
@@ -1756,7 +1791,7 @@ class ClickerApp:
         0x5B: "Win_L", 0x5C: "Win_R",
     }
 
-    def _on_low_level_key(self, vk: int, is_up: bool) -> None:
+    def _on_low_level_key(self, vk: int, is_up: bool, scan: int = 0, extended: bool = False) -> None:
         if not self._capturing_key:
             return
         keysym = self._VK_MODIFIER_KEYSYMS.get(vk)
@@ -1774,11 +1809,13 @@ class ClickerApp:
                 keysym = f"VK_{vk:02X}"
 
         class _E:
-            __slots__ = ("keycode", "keysym", "state")
+            __slots__ = ("keycode", "keysym", "state", "scan", "extended")
         evt = _E()
         evt.keycode = vk
         evt.keysym = keysym
         evt.state = 0
+        evt.scan = scan
+        evt.extended = extended
         if is_up:
             self._on_key_capture_release(evt)
         else:
@@ -1789,22 +1826,31 @@ class ClickerApp:
         self._key_combo_modifiers = []
         self._key_combo_main_name = ""
         self._key_combo_main_vk = 0
+        self._key_combo_main_scan = 0
+        self._key_combo_main_extended = False
+        self._key_combo_mod_scans = {}
 
     def _on_key_capture_press(self, event):
         if not self._capturing_key:
             return "break"
         self._key_pressed_keycodes.add(event.keycode)
+        scan = int(getattr(event, "scan", 0) or 0)
+        extended = bool(getattr(event, "extended", False))
         modifier = modifier_name_from_keysym(event.keysym)
         if modifier:
             if modifier not in self._key_combo_modifiers:
                 self._key_combo_modifiers.append(modifier)
+            if scan and modifier not in self._key_combo_mod_scans:
+                self._key_combo_mod_scans[modifier] = scan
         else:
             if not self._key_combo_main_name:
                 self._key_combo_main_name = key_name_from_event(event)
                 self._key_combo_main_vk = self._lookup_vk(self._key_combo_main_name, event.keycode)
+                self._key_combo_main_scan = scan
+                self._key_combo_main_extended = extended
         # Live preview: show what will be committed.
         preview_mods = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
-        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only — press a main key)"
+        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only — release to commit)"
         self._set_key_entry_text(self._key_capture_mode, preview_text)
         return "break"
 
@@ -1836,6 +1882,8 @@ class ClickerApp:
         rest = [m for m in self._key_combo_modifiers if m != primary]
         self._key_combo_main_name = primary
         self._key_combo_main_vk = self._modifier_vk(primary)
+        self._key_combo_main_scan = self._key_combo_mod_scans.get(primary, 0)
+        self._key_combo_main_extended = primary == "Win"
         self._key_combo_modifiers = rest
 
     @staticmethod
@@ -1864,6 +1912,13 @@ class ClickerApp:
         action["modifiers"] = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
         action["key_name"] = self._key_combo_main_name
         action["vk"] = self._key_combo_main_vk
+        action["scan_code"] = self._key_combo_main_scan
+        action["extended"] = self._key_combo_main_extended
+        action["mod_scans"] = {
+            name: self._key_combo_mod_scans[name]
+            for name in action["modifiers"]
+            if name in self._key_combo_mod_scans
+        }
         if self._key_capture_mode == "screen":
             self._refresh_screen_list_item(index)
         else:
@@ -2002,6 +2057,9 @@ class ClickerApp:
                     "vk": action.get("vk", 0),
                     "key_name": action.get("key_name", ""),
                     "modifiers": list(action.get("modifiers") or []),
+                    "scan_code": action.get("scan_code", 0),
+                    "extended": bool(action.get("extended", False)),
+                    "mod_scans": dict(action.get("mod_scans") or {}),
                     "delay": action.get("delay"),
                 }
             else:
@@ -2091,6 +2149,9 @@ class ClickerApp:
                     "vk": p_data.get("vk", 0),
                     "key_name": p_data.get("key_name", ""),
                     "modifiers": list(p_data.get("modifiers") or []),
+                    "scan_code": p_data.get("scan_code", 0),
+                    "extended": bool(p_data.get("extended", False)),
+                    "mod_scans": dict(p_data.get("mod_scans") or {}),
                     "delay": p_data.get("delay"),
                 })
             else:
@@ -2150,6 +2211,9 @@ class ClickerApp:
                     "vk": p_data.get("vk", 0),
                     "key_name": p_data.get("key_name", ""),
                     "modifiers": list(p_data.get("modifiers") or []),
+                    "scan_code": p_data.get("scan_code", 0),
+                    "extended": bool(p_data.get("extended", False)),
+                    "mod_scans": dict(p_data.get("mod_scans") or {}),
                     "delay": p_data.get("delay"),
                     "hwnd": found_hwnd,
                     "win_title": win_title,
