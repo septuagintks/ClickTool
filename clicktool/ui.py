@@ -1,13 +1,17 @@
 import os
 import threading
 import time
+import ctypes
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import win32gui
 import win32api
 import win32con
 
-from .winapi import user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN
+from .winapi import (
+    user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
+    KBDLLHOOKSTRUCT, LowLevelKeyboardProc, WH_KEYBOARD_LL, HC_ACTION, LLKHF_UP,
+)
 from .hotkey import (
     DEFAULT_HOTKEYS, HOTKEY_ACTIONS, VK_MAP,
     is_hotkey_pressed_globally, normalize_hotkey_text, hotkey_from_event,
@@ -153,7 +157,7 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
-        self.root.minsize(680, 520)
+        self.root.minsize(820, 600)
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
@@ -193,6 +197,8 @@ class ClickerApp:
         self._key_combo_modifiers: list[str] = []
         self._key_combo_main_name: str = ""
         self._key_combo_main_vk: int = 0
+        self._kb_hook_handle = None
+        self._kb_hook_proc = None
 
         self._build_ui()
         self._set_button_controls_enabled(False)
@@ -418,21 +424,25 @@ class ClickerApp:
         prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
         prop_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         prop_frame.columnconfigure(3, weight=1)
-        
-        self.screen_prop_label = ttk.Label(prop_frame, text="Value:")
-        self.screen_prop_label.grid(row=0, column=0, sticky="w")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=15)
-        self.screen_step_delay_entry.grid(row=0, column=1, padx=4)
-        self.screen_key_entry = ttk.Entry(prop_frame, width=24)
+        prop_frame.columnconfigure(0, minsize=110)
+        prop_frame.columnconfigure(1, minsize=190)
+        prop_frame.columnconfigure(2, minsize=120)
+
+        self.screen_prop_label = ttk.Label(prop_frame, text="Value:", anchor="w")
+        self.screen_prop_label.grid(row=0, column=0, sticky="ew")
+        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=22)
+        self.screen_step_delay_entry.grid(row=0, column=1, padx=4, sticky="w")
+        self.screen_key_entry = ttk.Entry(prop_frame, width=22)
         self.screen_key_entry.configure(state="readonly")
-        self.screen_key_entry.grid(row=0, column=1, padx=4)
+        self.screen_key_entry.grid(row=0, column=1, padx=4, sticky="w")
         self.screen_key_entry.grid_remove()
         self.screen_key_entry.bind("<KeyPress>", self._on_key_capture_press)
         self.screen_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
         self.screen_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("screen"))
         self.screen_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
-        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
-        ttk.Label(prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=2, sticky="w")
+        self.screen_button_label = ttk.Label(prop_frame, text="Button:")
+        self.screen_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.screen_button_combo = ttk.Combobox(
             prop_frame,
             textvariable=self.mouse_button_var,
@@ -455,22 +465,28 @@ class ClickerApp:
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
 
-        # Row 4: Controls
+        # Row 4: Controls — Add row, Edit row below
         action_bar = ttk.Frame(frame)
         action_bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        action_bar.columnconfigure(0, weight=1)
+
         add_group = ttk.LabelFrame(action_bar, text="Add", padding=(6, 4))
-        add_group.pack(side="left", padx=(0, 8))
-        ttk.Button(add_group, text="Dot", command=self.add_screen_dot, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Key", command=self.add_screen_key, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wait", command=self.add_screen_wait, width=9).pack(side="left")
+        add_group.grid(row=0, column=0, sticky="ew")
+        for i in range(4):
+            add_group.columnconfigure(i, weight=1, uniform="screen_add")
+        ttk.Button(add_group, text="Dot", command=self.add_screen_dot).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wheel", command=self.add_screen_wheel).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Key", command=self.add_screen_key).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wait", command=self.add_screen_wait).grid(row=0, column=3, padx=2, sticky="ew")
 
         edit_group = ttk.LabelFrame(action_bar, text="Edit", padding=(6, 4))
-        edit_group.pack(side="left")
-        ttk.Button(edit_group, text="Remove", command=self.remove_screen_position, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Up", width=5, command=lambda: self.move_screen_position(-1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Down", width=6, command=lambda: self.move_screen_position(1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Clear", command=self.clear_screen_positions, width=8).pack(side="left")
+        edit_group.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        for i in range(4):
+            edit_group.columnconfigure(i, weight=1, uniform="screen_edit")
+        ttk.Button(edit_group, text="Remove", command=self.remove_screen_position).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Up", command=lambda: self.move_screen_position(-1)).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Down", command=lambda: self.move_screen_position(1)).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Clear", command=self.clear_screen_positions).grid(row=0, column=3, padx=2, sticky="ew")
 
     def _build_window_mode_ui(self, frame) -> None:
         # Two columns: Window Column and Click Point Column
@@ -478,16 +494,25 @@ class ClickerApp:
         paned.grid(row=0, column=0, sticky="nsew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        
+
         # Left: Window Column
         win_frame = ttk.Frame(paned, padding=(0, 0, 8, 0))
         paned.add(win_frame, weight=1)
+        try:
+            paned.paneconfigure(win_frame, minsize=180)
+        except tk.TclError:
+            pass
         
         ttk.Label(win_frame, text="Target Windows").pack(anchor="w")
-        
+
+        win_btn_row = ttk.Frame(win_frame)
+        win_btn_row.pack(side="bottom", fill="x")
+        ttk.Button(win_btn_row, text="Add Window", command=self.add_target_window).pack(side="left", padx=2)
+        ttk.Button(win_btn_row, text="Remove", command=self.remove_target_window).pack(side="left", padx=2)
+
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
-        
+
         self.target_win_list = tk.Listbox(
             win_list_frame,
             height=12,
@@ -504,76 +529,44 @@ class ClickerApp:
             highlightcolor="#0078d7"
         )
         self.target_win_list.pack(side="left", fill="both", expand=True)
-        
+
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
         win_scroll.pack(side="right", fill="y")
         self.target_win_list.config(yscrollcommand=win_scroll.set)
         
-        win_btn_row = ttk.Frame(win_frame)
-        win_btn_row.pack(fill="x")
-        ttk.Button(win_btn_row, text="Add Window", command=self.add_target_window).pack(side="left", padx=2)
-        ttk.Button(win_btn_row, text="Remove", command=self.remove_target_window).pack(side="left", padx=2)
-        
         # Right: Click Point Column
         pt_frame = ttk.Frame(paned, padding=(8, 0, 0, 0))
         paned.add(pt_frame, weight=2)
+        try:
+            paned.paneconfigure(pt_frame, minsize=380)
+        except tk.TclError:
+            pass
         
         ttk.Label(pt_frame, text="Click Points (Cross-window sorting allowed)").pack(anchor="w")
-        
-        pt_list_frame = ttk.Frame(pt_frame)
-        pt_list_frame.pack(fill="both", expand=True, pady=4)
-        
-        columns = ("#", "type", "details")
-        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=12)
-        self.window_pt_tree.heading("#", text="#")
-        self.window_pt_tree.heading("type", text="Action")
-        self.window_pt_tree.heading("details", text="Details")
-        self.window_pt_tree.column("#", width=40, anchor="center")
-        self.window_pt_tree.column("type", width=80, anchor="center")
-        self.window_pt_tree.column("details", width=330, anchor="w")
-        
-        self.window_pt_tree.pack(side="left", fill="both", expand=True)
-        self.window_pt_tree.bind("<<TreeviewSelect>>", self._on_window_list_select)
-        
-        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_tree.yview)
-        pt_scroll.pack(side="right", fill="y")
-        self.window_pt_tree.configure(yscrollcommand=pt_scroll.set)
-        
-        pt_btn_row = ttk.Frame(pt_frame)
-        pt_btn_row.pack(fill="x")
-        add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
-        add_group.pack(side="left", padx=(0, 8))
-        ttk.Button(add_group, text="Dot", command=self.add_window_dot, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Key", command=self.add_window_key, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(add_group, text="Wait", command=self.add_window_wait, width=9).pack(side="left")
 
-        edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
-        edit_group.pack(side="left")
-        ttk.Button(edit_group, text="Remove", command=self.remove_window_position, width=9).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Up", width=5, command=lambda: self.move_window_position(-1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Down", width=6, command=lambda: self.move_window_position(1)).pack(side="left", padx=(0, 4))
-        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions, width=8).pack(side="left")
-
-        # Selected Item Properties for Window Mode
+        # Selected Item Properties (packed bottom first so it survives shrinking).
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
-        win_prop_frame.pack(fill="x", pady=(8, 0))
+        win_prop_frame.pack(side="bottom", fill="x", pady=(8, 0))
         win_prop_frame.columnconfigure(3, weight=1)
-        
-        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:")
-        self.window_prop_label.grid(row=0, column=0, sticky="w")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=15)
-        self.window_step_delay_entry.grid(row=0, column=1, padx=4)
-        self.window_key_entry = ttk.Entry(win_prop_frame, width=24)
+        win_prop_frame.columnconfigure(0, minsize=110)
+        win_prop_frame.columnconfigure(1, minsize=190)
+        win_prop_frame.columnconfigure(2, minsize=120)
+
+        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:", anchor="w")
+        self.window_prop_label.grid(row=0, column=0, sticky="ew")
+        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=22)
+        self.window_step_delay_entry.grid(row=0, column=1, padx=4, sticky="w")
+        self.window_key_entry = ttk.Entry(win_prop_frame, width=22)
         self.window_key_entry.configure(state="readonly")
-        self.window_key_entry.grid(row=0, column=1, padx=4)
+        self.window_key_entry.grid(row=0, column=1, padx=4, sticky="w")
         self.window_key_entry.grid_remove()
         self.window_key_entry.bind("<KeyPress>", self._on_key_capture_press)
         self.window_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
         self.window_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("window"))
         self.window_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
-        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
-        ttk.Label(win_prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=2, sticky="w")
+        self.window_button_label = ttk.Label(win_prop_frame, text="Button:")
+        self.window_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.window_button_combo = ttk.Combobox(
             win_prop_frame,
             textvariable=self.mouse_button_var,
@@ -595,6 +588,49 @@ class ClickerApp:
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
+
+        # Add/Edit button rows (packed bottom-up too).
+        pt_btn_row = ttk.Frame(pt_frame)
+        pt_btn_row.pack(side="bottom", fill="x")
+        pt_btn_row.columnconfigure(0, weight=1)
+
+        add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
+        add_group.grid(row=0, column=0, sticky="ew")
+        for i in range(4):
+            add_group.columnconfigure(i, weight=1, uniform="window_add")
+        ttk.Button(add_group, text="Dot", command=self.add_window_dot).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Key", command=self.add_window_key).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wait", command=self.add_window_wait).grid(row=0, column=3, padx=2, sticky="ew")
+
+        edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
+        edit_group.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        for i in range(4):
+            edit_group.columnconfigure(i, weight=1, uniform="window_edit")
+        ttk.Button(edit_group, text="Remove", command=self.remove_window_position).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Up", command=lambda: self.move_window_position(-1)).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Down", command=lambda: self.move_window_position(1)).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions).grid(row=0, column=3, padx=2, sticky="ew")
+
+        # List fills the remaining space; gets clipped first when vertical room runs out.
+        pt_list_frame = ttk.Frame(pt_frame)
+        pt_list_frame.pack(side="top", fill="both", expand=True, pady=4)
+
+        columns = ("#", "type", "details")
+        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=12)
+        self.window_pt_tree.heading("#", text="#")
+        self.window_pt_tree.heading("type", text="Action")
+        self.window_pt_tree.heading("details", text="Details")
+        self.window_pt_tree.column("#", width=40, anchor="center")
+        self.window_pt_tree.column("type", width=80, anchor="center")
+        self.window_pt_tree.column("details", width=330, anchor="w")
+
+        self.window_pt_tree.pack(side="left", fill="both", expand=True)
+        self.window_pt_tree.bind("<<TreeviewSelect>>", self._on_window_list_select)
+
+        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_tree.yview)
+        pt_scroll.pack(side="right", fill="y")
+        self.window_pt_tree.configure(yscrollcommand=pt_scroll.set)
 
     def _on_tab_changed(self, event):
         """Show only the dots belonging to the active tab."""
@@ -1150,6 +1186,22 @@ class ClickerApp:
         self._screen_positions[index]["y"] = y
         self._refresh_screen_list_item(index)
 
+    def _show_screen_button_row(self, show: bool) -> None:
+        if show:
+            self.screen_button_label.grid()
+            self.screen_button_combo.grid()
+        else:
+            self.screen_button_label.grid_remove()
+            self.screen_button_combo.grid_remove()
+
+    def _show_window_button_row(self, show: bool) -> None:
+        if show:
+            self.window_button_label.grid()
+            self.window_button_combo.grid()
+        else:
+            self.window_button_label.grid_remove()
+            self.window_button_combo.grid_remove()
+
     def _on_screen_list_select(self, event=None):
         """Update the property fields when a position is selected in the screen tree."""
         sel = self.screen_tree.selection()
@@ -1159,6 +1211,7 @@ class ClickerApp:
         pos = self._screen_positions[index]
         if pos["type"] == "click":
             self._show_screen_key_entry(False)
+            self._show_screen_button_row(True)
             self.screen_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
@@ -1167,6 +1220,7 @@ class ClickerApp:
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
             self._show_screen_key_entry(False)
+            self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1174,6 +1228,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
         elif pos["type"] == "key":
             self._show_screen_key_entry(True)
+            self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Key combo:")
             self._refresh_key_entry_text("screen", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1181,6 +1236,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
         else:
             self._show_screen_key_entry(False)
+            self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
@@ -1422,15 +1478,21 @@ class ClickerApp:
     def add_window_key(self) -> None:
         """Add an empty key action targeting the selected window and focus the capture entry."""
         sel_win = self.target_win_list.curselection()
-        win_data = self._target_windows[sel_win[0]] if sel_win else None
+        if not sel_win:
+            messagebox.showinfo("Select Window", "Select a target window from the left list first.")
+            return
+        win_data = self._target_windows[sel_win[0]]
+        if not user32.IsWindow(win_data["hwnd"]):
+            messagebox.showerror("Window Lost", "The selected window is no longer available.")
+            return
         self._window_positions.append({
             "type": "key",
             "vk": 0,
             "key_name": "",
             "modifiers": [],
             "delay": None,
-            "hwnd": win_data["hwnd"] if win_data else None,
-            "win_title": win_data["title"] if win_data else "",
+            "hwnd": win_data["hwnd"],
+            "win_title": win_data["title"],
         })
         self._refresh_window_pt_list()
         last_item = self.window_pt_tree.get_children()[-1]
@@ -1440,14 +1502,9 @@ class ClickerApp:
         self.notebook.select(1)
         self._show_window_key_entry(True)
         self.window_key_entry.focus_set()
-        if win_data:
-            self.status_var.set(
-                f"Press the key combo for '{win_data['title']}' (release all keys to finish)."
-            )
-        else:
-            self.status_var.set(
-                "Press the key combo (no target window selected — combo will be added without a window)."
-            )
+        self.status_var.set(
+            f"Press the key combo for '{win_data['title']}' (release all keys to finish)."
+        )
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in tree when dot is clicked."""
@@ -1473,6 +1530,7 @@ class ClickerApp:
         pos = self._window_positions[index]
         if pos["type"] == "click":
             self._show_window_key_entry(False)
+            self._show_window_button_row(True)
             self.window_prop_label.config(text="Pos (x,y):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
@@ -1481,6 +1539,7 @@ class ClickerApp:
             self._set_button_controls_enabled(True)
         elif pos["type"] == "wheel":
             self._show_window_key_entry(False)
+            self._show_window_button_row(False)
             self.window_prop_label.config(text="Wheel (x,y,delta):")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1488,6 +1547,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
         elif pos["type"] == "key":
             self._show_window_key_entry(True)
+            self._show_window_button_row(False)
             self.window_prop_label.config(text="Key combo:")
             self._refresh_key_entry_text("window", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1495,6 +1555,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
         else:
             self._show_window_key_entry(False)
+            self._show_window_button_row(False)
             self.window_prop_label.config(text="Wait (ms):")
             self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
@@ -1634,11 +1695,94 @@ class ClickerApp:
         self._key_capture_index = index
         self._reset_key_combo_state()
         self._set_key_entry_text(mode, "press the combo, then release all keys")
+        self._install_kb_hook()
 
     def _end_key_capture(self) -> None:
+        self._uninstall_kb_hook()
         self._capturing_key = False
         self._key_capture_index = None
         self._reset_key_combo_state()
+
+    def _install_kb_hook(self) -> None:
+        if self._kb_hook_handle:
+            return
+
+        def _proc(nCode, wParam, lParam):
+            try:
+                if nCode == HC_ACTION:
+                    info = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT))[0]
+                    is_up = bool(info.flags & LLKHF_UP)
+                    vk = int(info.vkCode)
+                    # Marshal into the Tk thread; swallow the key so the OS
+                    # doesn't act on Win+R, Win+E, Alt+Tab, etc.
+                    self._safe_after(self._on_low_level_key, vk, is_up)
+                    return 1  # non-zero == handled/suppressed
+            except Exception:
+                pass
+            return user32.CallNextHookEx(self._kb_hook_handle, nCode, wParam, lParam)
+
+        # Keep the callable alive — losing the reference invalidates the hook.
+        self._kb_hook_proc = LowLevelKeyboardProc(_proc)
+        h_module = ctypes.windll.kernel32.GetModuleHandleW(None)
+        self._kb_hook_handle = user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, self._kb_hook_proc, h_module, 0
+        )
+        if not self._kb_hook_handle:
+            # Hook install failed — fall back to focused-Tk-binding capture only.
+            self._kb_hook_proc = None
+
+    def _uninstall_kb_hook(self) -> None:
+        handle = self._kb_hook_handle
+        if handle:
+            try:
+                user32.UnhookWindowsHookEx(handle)
+            except Exception:
+                pass
+        self._kb_hook_handle = None
+        self._kb_hook_proc = None
+
+    _VK_TO_NAME = {
+        0x1B: "Esc", 0x0D: "Enter", 0x20: "Space", 0x09: "Tab",
+        0x2E: "Delete", 0x08: "BackSpace", 0x2D: "Insert",
+        0x21: "Prior", 0x22: "Next", 0x23: "End", 0x24: "Home",
+        0x25: "Left", 0x26: "Up", 0x27: "Right", 0x28: "Down",
+        0xBC: ",", 0xBE: ".", 0xBF: "/", 0xBA: ";", 0xDE: "'",
+        0xDB: "[", 0xDD: "]", 0xDC: "\\", 0xBD: "-", 0xBB: "=", 0xC0: "`",
+    }
+    _VK_MODIFIER_KEYSYMS = {
+        0x10: "Shift_L", 0xA0: "Shift_L", 0xA1: "Shift_R",
+        0x11: "Control_L", 0xA2: "Control_L", 0xA3: "Control_R",
+        0x12: "Alt_L", 0xA4: "Alt_L", 0xA5: "Alt_R",
+        0x5B: "Win_L", 0x5C: "Win_R",
+    }
+
+    def _on_low_level_key(self, vk: int, is_up: bool) -> None:
+        if not self._capturing_key:
+            return
+        keysym = self._VK_MODIFIER_KEYSYMS.get(vk)
+        if keysym is None:
+            name = self._VK_TO_NAME.get(vk)
+            if name:
+                keysym = name
+            elif 0x70 <= vk <= 0x7B:
+                keysym = f"F{vk - 0x70 + 1}"
+            elif 0x30 <= vk <= 0x39:
+                keysym = chr(vk)
+            elif 0x41 <= vk <= 0x5A:
+                keysym = chr(vk).lower()
+            else:
+                keysym = f"VK_{vk:02X}"
+
+        class _E:
+            __slots__ = ("keycode", "keysym", "state")
+        evt = _E()
+        evt.keycode = vk
+        evt.keysym = keysym
+        evt.state = 0
+        if is_up:
+            self._on_key_capture_release(evt)
+        else:
+            self._on_key_capture_press(evt)
 
     def _reset_key_combo_state(self) -> None:
         self._key_pressed_keycodes.clear()
@@ -1670,14 +1814,33 @@ class ClickerApp:
         self._key_pressed_keycodes.discard(event.keycode)
         if self._key_pressed_keycodes:
             return "break"
-        # All keys are up — commit if we captured a main key.
-        if self._key_combo_main_name and self._key_capture_index is not None:
+        if self._key_capture_index is None:
+            self._reset_key_combo_state()
+            return "break"
+        if self._key_combo_main_name:
+            self._commit_key_combo()
+        elif self._key_combo_modifiers:
+            # Lone modifier(s) released with no main key: commit the
+            # last modifier as the key itself (e.g. Ctrl, Win).
+            self._promote_lone_modifier()
             self._commit_key_combo()
         else:
-            # Nothing committed; reset to the existing action's value.
             self._refresh_capture_target_entry()
         self._reset_key_combo_state()
         return "break"
+
+    def _promote_lone_modifier(self) -> None:
+        if not self._key_combo_modifiers:
+            return
+        primary = self._key_combo_modifiers[-1]
+        rest = [m for m in self._key_combo_modifiers if m != primary]
+        self._key_combo_main_name = primary
+        self._key_combo_main_vk = self._modifier_vk(primary)
+        self._key_combo_modifiers = rest
+
+    @staticmethod
+    def _modifier_vk(name: str) -> int:
+        return {"Ctrl": 0x11, "Alt": 0x12, "Shift": 0x10, "Win": 0x5B}.get(name, 0)
 
     def _refresh_capture_target_entry(self) -> None:
         if self._key_capture_index is None:
@@ -2373,6 +2536,7 @@ class ClickerApp:
         self.apply_script_data(data, source_path=file_path)
 
     def on_close(self) -> None:
+        self._uninstall_kb_hook()
         self._stop_event.set()
         thread = self._click_thread
         if thread and thread.is_alive():
