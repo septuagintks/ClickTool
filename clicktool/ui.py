@@ -158,7 +158,10 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
-        self.root.minsize(820, 600)
+        # Provisional minsize — the real value is computed once the layout
+        # has settled (see _compute_root_minsize). Floor stays at 820x520 so
+        # the first paint isn't a sliver.
+        self.root.minsize(820, 520)
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
@@ -212,6 +215,10 @@ class ClickerApp:
         self._hotkey_thread = threading.Thread(target=self._watch_global_hotkeys, daemon=True)
         self._hotkey_thread.start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Derive the global minimum window size from the natural sizes of every
+        # tab once geometry has settled. Settings' compact layout is the
+        # tightest case, so we measure it explicitly.
+        self.root.after_idle(self._compute_root_minsize)
 
     def _apply_ui_theme(self) -> None:
         style = ttk.Style()
@@ -324,34 +331,40 @@ class ClickerApp:
 
     def _build_settings_ui(self, frame) -> None:
         frame.columnconfigure(0, weight=1)
+        self._settings_frame = frame
+
         bg_frame = ttk.LabelFrame(frame, text="Window Mode", padding=10)
         bg_frame.grid(row=0, column=0, sticky="ew")
+        bg_frame.columnconfigure(1, weight=1)
         ttk.Checkbutton(
             bg_frame,
             text="Pure background clicking",
             variable=self.pure_background_window_click_var,
             command=self._on_pure_background_setting_changed,
         ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
+        self._settings_pure_bg_desc = ttk.Label(
             bg_frame,
             text="When enabled, window-mode dots are limited to the target client area and title-bar clicks are disabled.",
             foreground="#555555",
-            wraplength=500,
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+            justify="left",
+        )
+        self._settings_pure_bg_desc.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         hotkey_scope_frame = ttk.LabelFrame(frame, text="Hotkey Scope", padding=10)
         hotkey_scope_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        hotkey_scope_frame.columnconfigure(1, weight=1)
         ttk.Checkbutton(
             hotkey_scope_frame,
             text="Enable global hotkeys",
             variable=self.enable_global_hotkeys_var,
         ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
+        self._settings_global_hk_desc = ttk.Label(
             hotkey_scope_frame,
             text="When enabled, shortcuts trigger system-wide (works without focusing ClickTool). When disabled, shortcuts only fire when ClickTool has focus.",
             foreground="#555555",
-            wraplength=500,
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+            justify="left",
+        )
+        self._settings_global_hk_desc.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         defaults_frame = ttk.LabelFrame(frame, text="Defaults", padding=10)
         defaults_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -397,6 +410,60 @@ class ClickerApp:
             text="Examples: Ctrl+D, Ctrl+Shift+W, Esc. Leave blank to disable an action.",
             foreground="#555555",
         ).grid(row=((len(HOTKEY_ACTIONS) + 1) // 2) + 1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        # Live-relayout the two top descriptions: when vertical room is tight,
+        # snap them to the right of their checkbox so they stop stacking
+        # rows. When room is generous, they go back below for readability.
+        self._settings_compact = None
+        frame.bind("<Configure>", self._reflow_settings_descriptions)
+
+    def _reflow_settings_descriptions(self, event=None) -> None:
+        frame = getattr(self, "_settings_frame", None)
+        if frame is None:
+            return
+        try:
+            avail_h = frame.winfo_height()
+            avail_w = frame.winfo_width()
+        except tk.TclError:
+            return
+        if avail_h <= 1 or avail_w <= 1:
+            return
+        # Natural height with descriptions stacked under their checkbox.
+        natural = max(frame.winfo_reqheight(), 1)
+        # Compact when actual height is meaningfully shorter than natural.
+        compact = avail_h < natural - 8
+        if compact != self._settings_compact:
+            self._apply_settings_compact(compact)
+            self._settings_compact = compact
+        else:
+            # Even when mode hasn't flipped, the wraplength has to track width.
+            self._update_settings_wraplengths(avail_w, compact)
+
+    def _apply_settings_compact(self, compact: bool) -> None:
+        for desc, anchor_col0_width in (
+            (self._settings_pure_bg_desc, 180),
+            (self._settings_global_hk_desc, 160),
+        ):
+            desc.grid_forget()
+            if compact:
+                # Sit to the right of the checkbox, sharing the row.
+                desc.grid(row=0, column=1, sticky="ew", padx=(12, 0))
+            else:
+                # Stack underneath the checkbox.
+                desc.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self._update_settings_wraplengths(self._settings_frame.winfo_width(), compact)
+
+    def _update_settings_wraplengths(self, frame_width: int, compact: bool) -> None:
+        # Account for LabelFrame padding (10) + checkbox column.
+        if compact:
+            wrap = max(180, frame_width - 240)
+        else:
+            wrap = max(220, frame_width - 60)
+        for desc in (self._settings_pure_bg_desc, self._settings_global_hk_desc):
+            try:
+                desc.configure(wraplength=wrap)
+            except tk.TclError:
+                pass
 
     def _build_screen_mode_ui(self, frame) -> None:
         frame.columnconfigure(0, weight=1)
@@ -1200,6 +1267,57 @@ class ClickerApp:
         self._refresh_screen_list_item(index)
 
     def _clamp_paned_sash(self, event=None) -> None:
+        paned = getattr(self, "_win_paned", None)
+        if paned is None:
+            return
+        try:
+            total = paned.winfo_width()
+            if total <= 1:
+                return
+            current = paned.sashpos(0)
+            min_left = self._win_pane_min_left
+            max_left = max(min_left, total - self._win_pane_min_right)
+            clamped = max(min_left, min(current, max_left))
+            if clamped != current:
+                paned.sashpos(0, clamped)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _compute_root_minsize(self) -> None:
+        """Lock the root window's minimum size to the smallest layout that
+        still fits every tab. Settings is the chunkiest tab, so we force its
+        compact reflow first, measure, and restore."""
+        try:
+            self.root.update_idletasks()
+            # Force compact mode on Settings to measure the smaller size.
+            prev_compact = self._settings_compact
+            self._apply_settings_compact(True)
+            self._settings_compact = True
+            self.root.update_idletasks()
+
+            min_h = 0
+            for tab_id in self.notebook.tabs():
+                tab_widget = self.notebook.nametowidget(tab_id)
+                min_h = max(min_h, int(tab_widget.winfo_reqheight()))
+            # Notebook tab strip + bottom bar + a little chrome.
+            tab_strip = 32
+            bottom = 0
+            for child in self.root.winfo_children():
+                if child is self.notebook:
+                    continue
+                bottom += int(child.winfo_reqheight())
+            min_h += tab_strip + bottom + 16
+
+            min_w = max(820, int(self.notebook.winfo_reqwidth()) + 32)
+            self.root.minsize(min_w, min_h)
+
+            # Restore whatever the actual window asked for.
+            actual_compact = bool(prev_compact)
+            self._apply_settings_compact(actual_compact)
+            self._settings_compact = actual_compact
+            self._reflow_settings_descriptions()
+        except (tk.TclError, AttributeError):
+            pass
         paned = getattr(self, "_win_paned", None)
         if paned is None:
             return
