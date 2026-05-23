@@ -16,9 +16,29 @@ WM_MOUSEWHEEL = 0x020A
 WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
 VK_ESCAPE = 0x1B
+VK_LWIN = 0x5B
+VK_RWIN = 0x5C
 MK_LBUTTON = 0x0001
 
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+WM_SYSKEYDOWN = 0x0104
+WM_SYSKEYUP = 0x0105
+
 INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+KEYEVENTF_EXTENDEDKEY = 0x0001
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+KEYEVENTF_SCANCODE = 0x0008
+
+WH_KEYBOARD_LL = 13
+LLKHF_EXTENDED = 0x01
+LLKHF_INJECTED = 0x10
+LLKHF_ALTDOWN = 0x20
+LLKHF_UP = 0x80
+HC_ACTION = 0
+
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
@@ -97,6 +117,21 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong), ("iu", INPUT_UNION)]
 
 
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", ctypes.c_ulong),
+        ("scanCode", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+LowLevelKeyboardProc = ctypes.WINFUNCTYPE(
+    ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+)
+
+
 # WinAPI Function Prototypes
 user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
@@ -131,6 +166,14 @@ user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, w
 user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
 user32.IsIconic.argtypes = [wintypes.HWND]
 user32.IsIconic.restype = wintypes.BOOL
+user32.SetWindowsHookExW.argtypes = [ctypes.c_int, LowLevelKeyboardProc, wintypes.HINSTANCE, wintypes.DWORD]
+user32.SetWindowsHookExW.restype = wintypes.HHOOK
+user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+user32.CallNextHookEx.restype = wintypes.LPARAM
+user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+user32.MapVirtualKeyW.restype = wintypes.UINT
 
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE

@@ -20,6 +20,7 @@ MOUSE_BUTTON_LABELS = {
     "x1": "Side 1",
     "x2": "Side 2",
 }
+KEY_MODIFIERS = ("Ctrl", "Alt", "Shift", "Win")
 
 
 def coerce_non_negative_int(value, default: int) -> int:
@@ -73,6 +74,26 @@ def normalize_mouse_action(action: dict) -> dict:
         action["delay"] = coerce_optional_non_negative_int(action.get("delay"))
     elif action_type == "wait":
         action["ms"] = coerce_non_negative_int(action.get("ms"), 0)
+    elif action_type == "key":
+        action["vk"] = coerce_int_or(action.get("vk"), 0)
+        action["scan_code"] = coerce_int_or(action.get("scan_code"), 0)
+        action["extended"] = bool(action.get("extended", False))
+        action["key_name"] = str(action.get("key_name") or "")
+        raw_mods = action.get("modifiers") or []
+        if isinstance(raw_mods, str):
+            raw_mods = [raw_mods]
+        seen: set[str] = set()
+        normalized_mods: list[str] = []
+        for m in raw_mods:
+            name = str(m).strip().capitalize()
+            if name in KEY_MODIFIERS and name not in seen:
+                seen.add(name)
+                normalized_mods.append(name)
+        action["modifiers"] = [name for name in KEY_MODIFIERS if name in seen]
+        action["mod_scans"] = action.get("mod_scans") or {}
+        if not isinstance(action["mod_scans"], dict):
+            action["mod_scans"] = {}
+        action["delay"] = coerce_optional_non_negative_int(action.get("delay"))
     return action
 
 
@@ -84,6 +105,14 @@ def coerce_wheel_delta(value, default: int) -> int:
     return value if value != 0 else default
 
 
+def format_key_combo(action: dict) -> str:
+    modifiers = action.get("modifiers") or []
+    key_name = action.get("key_name") or ""
+    ordered = [name for name in KEY_MODIFIERS if name in modifiers]
+    parts = [*ordered, key_name] if key_name else list(ordered)
+    return "+".join(parts)
+
+
 def get_mouse_action_name(action: dict) -> str:
     action_type = action.get("type", "click")
     if action_type == "click":
@@ -93,6 +122,8 @@ def get_mouse_action_name(action: dict) -> str:
         delta = coerce_wheel_delta(action.get("delta"), -1)
         direction = "Up" if delta > 0 else "Down"
         return f"Wheel {direction}"
+    if action_type == "key":
+        return "Key"
     return "Wait"
 
 
@@ -108,6 +139,9 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
     if action_type == "wheel":
         delta = coerce_wheel_delta(action.get("delta"), -1)
         return f"{prefix}Delta {delta} at ({int(action['x'])}, {int(action['y'])}){suffix}"
+    if action_type == "key":
+        combo = format_key_combo(action) or "(press a key)"
+        return f"{prefix}{combo}{suffix}"
     return f"Delay: {action['ms']}ms"
 
 

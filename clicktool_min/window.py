@@ -1,17 +1,33 @@
 from .winapi import (
-    user32, kernel32, POINT, RECT, INPUT, MOUSEINPUT, INPUT_MOUSE,
+    user32, kernel32, POINT, RECT, INPUT, MOUSEINPUT, KEYBDINPUT, INPUT_MOUSE, INPUT_KEYBOARD,
     MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
     SM_CXSCREEN, SM_CYSCREEN,
     SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
     WHEEL_DELTA,
-    WM_MOUSEWHEEL,
+    WM_MOUSEWHEEL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    KEYEVENTF_KEYUP, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_SCANCODE,
+    VK_LWIN, VK_RWIN,
     BUTTON_INPUT_MAP, BUTTON_MESSAGE_MAP,
     CWP_SKIPINVISIBLE, EnumWindowsProc,
     makelong, make_wparam, enable_dpi_awareness,
 )
+from .hotkey import VK_MAP
 from .script import coerce_wheel_delta, normalize_mouse_action
 import ctypes
 import time
+
+MAPVK_VK_TO_VSC = 0
+MODIFIER_VK = {
+    "Ctrl": 0x11,
+    "Alt": 0x12,
+    "Shift": 0x10,
+    "Win": VK_LWIN,
+}
+EXTENDED_VK = {
+    VK_LWIN, VK_RWIN,
+    0x21, 0x22, 0x23, 0x24, 0x2D, 0x2E,  # PageUp/Down, End, Home, Insert, Delete
+    0x25, 0x26, 0x27, 0x28,              # arrows
+}
 
 
 def get_window_title(hwnd):
@@ -208,3 +224,106 @@ def perform_window_mouse_action(hwnd: int, action: dict) -> bool:
     tx = int(sx - t_cl_tl.x)
     ty = int(sy - t_cl_tl.y)
     return post_window_mouse_action(target_hwnd, action, tx, ty, sx, sy)
+
+
+def _resolve_key_vk(action: dict) -> int:
+    vk = int(action.get("vk") or 0)
+    if vk:
+        return vk
+    name = (action.get("key_name") or "").upper()
+    return VK_MAP.get(name, 0)
+
+
+def _scan_for_vk(vk: int, action_scan: int = 0) -> tuple[int, bool]:
+    """Return (scan_code, is_extended) — prefer the captured scan, fall back to the layout map."""
+    if action_scan:
+        return action_scan & 0xFF, vk in EXTENDED_VK
+    sc = user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)
+    return int(sc) & 0xFF, vk in EXTENDED_VK
+
+
+def _build_key_input_scan(scan: int, extended: bool, key_up: bool) -> INPUT:
+    flags = KEYEVENTF_SCANCODE
+    if extended:
+        flags |= KEYEVENTF_EXTENDEDKEY
+    if key_up:
+        flags |= KEYEVENTF_KEYUP
+    inp = INPUT()
+    inp.type = INPUT_KEYBOARD
+    # vk=0, scan carries the identity. The OS routes by scan, bypassing IME / layout.
+    inp.iu.ki = KEYBDINPUT(0, scan, flags, 0, None)
+    return inp
+
+
+def _build_key_input_vk(vk: int, key_up: bool) -> INPUT:
+    flags = 0
+    if vk in EXTENDED_VK:
+        flags |= KEYEVENTF_EXTENDEDKEY
+    if key_up:
+        flags |= KEYEVENTF_KEYUP
+    inp = INPUT()
+    inp.type = INPUT_KEYBOARD
+    inp.iu.ki = KEYBDINPUT(vk, 0, flags, 0, None)
+    return inp
+
+
+def perform_screen_key_action(action: dict) -> bool:
+    vk = _resolve_key_vk(action)
+    if not vk:
+        return False
+    main_scan, main_ext = _scan_for_vk(vk, int(action.get("scan_code") or 0))
+    if action.get("extended"):
+        main_ext = True
+    modifiers = action.get("modifiers") or []
+    mod_scans_raw = action.get("mod_scans") or {}
+
+    sequence: list[INPUT] = []
+    for name in modifiers:
+        mvk = MODIFIER_VK.get(name)
+        if mvk is None:
+            continue
+        captured_scan = int(mod_scans_raw.get(name) or 0)
+        msc, mext = _scan_for_vk(mvk, captured_scan)
+        sequence.append(_build_key_input_scan(msc, mext, key_up=False))
+    if main_scan:
+        sequence.append(_build_key_input_scan(main_scan, main_ext, key_up=False))
+        sequence.append(_build_key_input_scan(main_scan, main_ext, key_up=True))
+    else:
+        # Fall back to VK injection if we have neither scan nor a layout mapping.
+        sequence.append(_build_key_input_vk(vk, key_up=False))
+        sequence.append(_build_key_input_vk(vk, key_up=True))
+    for name in reversed(modifiers):
+        mvk = MODIFIER_VK.get(name)
+        if mvk is None:
+            continue
+        captured_scan = int(mod_scans_raw.get(name) or 0)
+        msc, mext = _scan_for_vk(mvk, captured_scan)
+        sequence.append(_build_key_input_scan(msc, mext, key_up=True))
+
+    if not sequence:
+        return False
+    arr = (INPUT * len(sequence))(*sequence)
+    sent = user32.SendInput(len(sequence), arr, ctypes.sizeof(INPUT))
+    return sent == len(sequence)
+
+
+def perform_window_key_action(hwnd: int, action: dict) -> bool:
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
+    vk = _resolve_key_vk(action)
+    if not vk:
+        return False
+    modifiers = action.get("modifiers") or []
+    mod_vks = [MODIFIER_VK[name] for name in modifiers if name in MODIFIER_VK]
+
+    use_sys = "Alt" in modifiers
+    down_msg = WM_SYSKEYDOWN if use_sys else WM_KEYDOWN
+    up_msg = WM_SYSKEYUP if use_sys else WM_KEYUP
+
+    for mvk in mod_vks:
+        user32.PostMessageW(hwnd, WM_KEYDOWN, mvk, 0)
+    user32.PostMessageW(hwnd, down_msg, vk, 0)
+    user32.PostMessageW(hwnd, up_msg, vk, 0)
+    for mvk in reversed(mod_vks):
+        user32.PostMessageW(hwnd, WM_KEYUP, mvk, 0)
+    return True
