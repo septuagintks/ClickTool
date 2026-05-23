@@ -1,13 +1,15 @@
 import ctypes
 import time
 import win32gui
-import win32api
 
 from .winapi import (
     user32, POINT, RECT, WM_MOUSEWHEEL, WHEEL_DELTA,
-    MOUSEEVENTF_WHEEL, BUTTON_MESSAGE_MAP, BUTTON_INPUT_MAP,
-    INPUT, KEYBDINPUT, INPUT_KEYBOARD,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
+    BUTTON_MESSAGE_MAP, BUTTON_INPUT_MAP,
+    INPUT, MOUSEINPUT, KEYBDINPUT, INPUT_MOUSE, INPUT_KEYBOARD,
     KEYEVENTF_KEYUP, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_SCANCODE,
+    SM_CXSCREEN, SM_CYSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
     WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     VK_LWIN, VK_RWIN,
     makelong, make_wparam,
@@ -127,20 +129,49 @@ def perform_screen_mouse_action(action: dict) -> bool:
     action_type = action.get("type", "click")
     x = int(action["x"])
     y = int(action["y"])
-    win32api.SetCursorPos((x, y))
+
+    vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+    vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+    vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    if vw <= 0 or vh <= 0:
+        vx, vy = 0, 0
+        vw = max(1, user32.GetSystemMetrics(SM_CXSCREEN))
+        vh = max(1, user32.GetSystemMetrics(SM_CYSCREEN))
+    nx = int((x - vx) * 65535 / max(1, vw - 1))
+    ny = int((y - vy) * 65535 / max(1, vh - 1))
+    move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+
+    inp_move = INPUT()
+    inp_move.type = INPUT_MOUSE
+    inp_move.iu.mi = MOUSEINPUT(nx, ny, 0, move_flags, 0, None)
 
     if action_type == "click":
         button = action.get("button", "left")
-        down_flag, up_flag, data = BUTTON_INPUT_MAP.get(button, BUTTON_INPUT_MAP["left"])
-        win32api.mouse_event(down_flag, 0, 0, data, 0)
-        time.sleep(0.05)
-        win32api.mouse_event(up_flag, 0, 0, data, 0)
+        down_flag, up_flag, mouse_data = BUTTON_INPUT_MAP.get(button, BUTTON_INPUT_MAP["left"])
+
+        inp_down = INPUT()
+        inp_down.type = INPUT_MOUSE
+        inp_down.iu.mi = MOUSEINPUT(0, 0, mouse_data, down_flag, 0, None)
+
+        inp_up = INPUT()
+        inp_up.type = INPUT_MOUSE
+        inp_up.iu.mi = MOUSEINPUT(0, 0, mouse_data, up_flag, 0, None)
+
+        inputs = (INPUT * 3)(inp_move, inp_down, inp_up)
+        sent = user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
+        if sent != 3:
+            return False
         return True
 
     if action_type == "wheel":
         delta = coerce_wheel_delta(action.get("delta"), -1)
-        win32api.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, delta * WHEEL_DELTA, 0)
-        return True
+        inp_wheel = INPUT()
+        inp_wheel.type = INPUT_MOUSE
+        inp_wheel.iu.mi = MOUSEINPUT(0, 0, delta * WHEEL_DELTA, MOUSEEVENTF_WHEEL, 0, None)
+        inputs = (INPUT * 2)(inp_move, inp_wheel)
+        sent = user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+        return sent == 2
 
     return False
 
