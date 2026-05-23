@@ -1159,7 +1159,7 @@ class ClickerApp:
         self.screen_list.selection_set(last_idx)
         self.screen_list.activate(last_idx)
         self._on_screen_list_select()
-        self._begin_key_capture(last_idx, "screen")
+        self._begin_key_capture("screen")
         self.status_var.set("Press a key combination...")
 
     def _on_screen_dot_click(self, index):
@@ -1182,37 +1182,39 @@ class ClickerApp:
         if not sel:
             return
         pos = self._screen_positions[sel[0]]
-        ptype = pos.get("type", "click")
-        if ptype == "click":
+        if pos["type"] == "click":
+            self._show_screen_key_entry(False)
+            self._show_screen_button_row(True)
             self.screen_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
-            self._hide_key_entry()
-        elif ptype == "wheel":
+        elif pos["type"] == "wheel":
+            self._show_screen_key_entry(False)
+            self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wheel:")
-            self.step_delay_var.set(
-                f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
-            )
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
-            self._hide_key_entry()
-        elif ptype == "key":
-            self._show_screen_key_entry()
+        elif pos["type"] == "key":
+            self._show_screen_key_entry(True)
+            self._show_screen_button_row(False)
+            self.screen_prop_label.config(text="Key:")
+            self._refresh_key_entry_text("screen", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
-            self._refresh_key_entry_text(sel[0], "screen")
         else:
+            self._show_screen_key_entry(False)
+            self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wait:")
-            self.step_delay_var.set(str(pos.get("ms", 0)))
+            self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.screen_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
-            self._hide_key_entry()
 
     def remove_screen_position(self) -> None:
         sel = self.screen_list.curselection()
@@ -1475,7 +1477,7 @@ class ClickerApp:
         self.window_pt_list.selection_set(last_idx)
         self.window_pt_list.activate(last_idx)
         self._on_window_list_select()
-        self._begin_key_capture(last_idx, "window")
+        self._begin_key_capture("window")
         self.status_var.set("Press a key combination...")
 
     def _on_window_dot_click(self, index):
@@ -1499,37 +1501,39 @@ class ClickerApp:
         if not sel:
             return
         pos = self._window_positions[sel[0]]
-        ptype = pos.get("type", "click")
-        if ptype == "click":
+        if pos["type"] == "click":
+            self._show_window_key_entry(False)
+            self._show_window_button_row(True)
             self.window_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(True)
-            self._hide_key_entry()
-        elif ptype == "wheel":
+        elif pos["type"] == "wheel":
+            self._show_window_key_entry(False)
+            self._show_window_button_row(False)
             self.window_prop_label.config(text="Wheel:")
-            self.step_delay_var.set(
-                f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
-            )
+            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
-            self._hide_key_entry()
-        elif ptype == "key":
-            self._show_window_key_entry()
+        elif pos["type"] == "key":
+            self._show_window_key_entry(True)
+            self._show_window_button_row(False)
+            self.window_prop_label.config(text="Key:")
+            self._refresh_key_entry_text("window", pos)
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
-            self._refresh_key_entry_text(sel[0], "window")
         else:
+            self._show_window_key_entry(False)
+            self._show_window_button_row(False)
             self.window_prop_label.config(text="Wait:")
-            self.step_delay_var.set(str(pos.get("ms", 0)))
+            self.step_delay_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.window_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
-            self._hide_key_entry()
 
     def remove_window_position(self) -> None:
         sel = self.window_pt_list.curselection()
@@ -1851,15 +1855,28 @@ class ClickerApp:
         except Exception:
             return 0
 
-    def _begin_key_capture(self, index: int, mode: str) -> None:
+    def _begin_key_capture(self, mode: str) -> None:
+        listbox = self.screen_list if mode == "screen" else self.window_pt_list
+        positions = self._screen_positions if mode == "screen" else self._window_positions
+        sel = listbox.curselection()
+        if not sel:
+            self._capturing_key = False
+            self._key_capture_index = None
+            return
+        index = sel[0]
+        if not (0 <= index < len(positions)) or positions[index].get("type") != "key":
+            self._capturing_key = False
+            self._key_capture_index = None
+            return
         self._capturing_key = True
-        self._key_capture_index = index
         self._key_capture_mode = mode
+        self._key_capture_index = index
         self._reset_key_combo_state()
-        self._install_kb_hook()
         entry = self._key_entry_for_mode(mode)
         if entry:
-            entry.focus_set()
+            entry.delete(0, tk.END)
+            entry.insert(0, "press the combo, then release all keys")
+        self._install_kb_hook()
 
     def _end_key_capture(self) -> None:
         self._capturing_key = False
@@ -1975,36 +1992,52 @@ class ClickerApp:
         self._end_key_capture()
         self.status_var.set(f"Captured: {format_combo(action['modifiers'], action['key_name'])}")
 
-    def _show_screen_key_entry(self) -> None:
-        self.screen_prop_label.config(text="Key Combo:")
-        self.step_delay_var.set("")
-        self._set_button_controls_enabled(False)
-        self._hide_key_entry()
+    def _show_screen_button_row(self, show: bool) -> None:
+        if show:
+            self.screen_button_label.grid()
+            self.screen_button_combo.grid()
+        else:
+            self.screen_button_label.grid_remove()
+            self.screen_button_combo.grid_remove()
 
-    def _show_window_key_entry(self) -> None:
-        self.window_prop_label.config(text="Key Combo:")
-        self.step_delay_var.set("")
-        self._set_button_controls_enabled(False)
-        self._hide_key_entry()
+    def _show_window_button_row(self, show: bool) -> None:
+        if show:
+            self.window_button_label.grid()
+            self.window_button_combo.grid()
+        else:
+            self.window_button_label.grid_remove()
+            self.window_button_combo.grid_remove()
 
-    def _hide_key_entry(self) -> None:
-        pass
+    def _show_screen_key_entry(self, show: bool) -> None:
+        if show:
+            self.screen_step_delay_entry.grid_remove()
+            self.screen_key_entry.grid()
+        else:
+            self.screen_key_entry.grid_remove()
+            self.screen_step_delay_entry.grid()
 
-    def _key_entry_for_mode(self, mode: str):
-        return self.root
+    def _show_window_key_entry(self, show: bool) -> None:
+        if show:
+            self.window_step_delay_entry.grid_remove()
+            self.window_key_entry.grid()
+        else:
+            self.window_key_entry.grid_remove()
+            self.window_step_delay_entry.grid()
 
-    def _set_key_entry_text(self, text: str) -> None:
-        self.step_delay_var.set(text)
+    def _key_entry_for_mode(self, mode: str) -> ttk.Entry:
+        return self.screen_key_entry if mode == "screen" else self.window_key_entry
 
-    def _refresh_key_entry_text(self, index: int, mode: str) -> None:
-        positions = self._screen_positions if mode == "screen" else self._window_positions
-        if not (0 <= index < len(positions)):
-            return
-        action = positions[index]
-        if action.get("type") != "key":
-            return
+    def _set_key_entry_text(self, mode: str, text: str) -> None:
+        entry = self._key_entry_for_mode(mode)
+        entry.configure(state="normal")
+        entry.delete(0, tk.END)
+        if text:
+            entry.insert(0, text)
+        entry.configure(state="readonly")
 
-        if self._capturing_key and self._key_capture_index == index:
+    def _refresh_key_entry_text(self, mode: str, action: dict) -> None:
+        text = format_key_combo(action) or "(press a key)"
+        self._set_key_entry_text(mode, text)
             parts = list(self._key_combo_modifiers)
             if self._key_combo_main:
                 parts.append(self._key_combo_main)
