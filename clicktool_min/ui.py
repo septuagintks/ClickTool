@@ -41,7 +41,7 @@ from .window import (
 )
 from .paths import (
     get_app_data_dir, get_auto_config_path, get_auto_log_path,
-    write_auto_log, show_already_running_message,
+    write_auto_log, log_error, show_already_running_message,
 )
 
 ROOT_MIN_WIDTH = 820
@@ -1073,7 +1073,7 @@ class ClickerApp:
                 if user32.GetCursorPos(ctypes.byref(pt)):
                     x, y = pt.x, pt.y
             except Exception:
-                pass
+                log_error(get_auto_log_path(), "Getting cursor position for screen action")
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
             screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
@@ -1108,7 +1108,7 @@ class ClickerApp:
                 if user32.GetCursorPos(ctypes.byref(pt)):
                     x, y = pt.x, pt.y
             except Exception:
-                pass
+                log_error(get_auto_log_path(), "Getting cursor position for screen action")
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
             screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
@@ -1341,8 +1341,8 @@ class ClickerApp:
                     if 0 <= rx <= win_w and 0 <= ry <= win_h:
                         rel_x, rel_y = rx, ry
             except Exception:
-                pass
-
+                log_error(get_auto_log_path(), "Getting cursor position for window action")
+        
         if rel_x is None or rel_y is None:
             rel_x, rel_y = win_w // 2, win_h // 2
             bounds = get_client_bounds_in_window(hwnd)
@@ -1811,14 +1811,14 @@ class ClickerApp:
             self._kb_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, hmod, 0)
             self._kb_hook_proc = hook_proc
         except Exception:
-            pass
+            log_error(get_auto_log_path(), "Installing keyboard hook")
 
     def _uninstall_kb_hook(self) -> None:
         if self._kb_hook:
             try:
                 user32.UnhookWindowsHookEx(self._kb_hook)
             except Exception:
-                pass
+                log_error(get_auto_log_path(), "Uninstalling keyboard hook")
             self._kb_hook = None
             self._kb_hook_proc = None
 
@@ -1835,12 +1835,16 @@ class ClickerApp:
                     self._safe_after(self._on_key_capture_release, vk)
                 else:
                     self._safe_after(self._on_key_capture_press, vk, scan, extended)
+                # We return 1 to swallow the event so system hotkeys like Win+D or Alt+Tab
+                # don't trigger during capture, but this risks disrupting normal OS use
+                # if the hook isn't uninstalled properly.
                 return 1
             except Exception:
-                pass
+                log_error(get_auto_log_path(), "Processing low-level keyboard hook")
         try:
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
         except Exception:
+            log_error(get_auto_log_path(), "CallNextHookEx in keyboard hook")
             return 0
 
     def _begin_key_capture(self, mode: str) -> None:
@@ -1864,7 +1868,7 @@ class ClickerApp:
         if entry:
             entry.configure(state="normal")
             entry.delete(0, tk.END)
-            entry.insert(0, "press the combo, then release all keys")
+            entry.insert(0, "press combo (SYSTEM HOTKEYS SUPPRESSED), then release all")
             entry.configure(state="readonly")
         self._install_kb_hook()
 
@@ -2196,6 +2200,7 @@ class ClickerApp:
             try:
                 hotkey_map = dict(self._hotkey_map)
             except Exception:
+                log_error(get_auto_log_path(), "Copying hotkey map in global watcher")
                 continue
 
             now = time.monotonic()

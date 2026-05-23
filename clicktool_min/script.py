@@ -2,6 +2,7 @@ import json
 import os
 
 from .hotkey import DEFAULT_HOTKEYS, normalize_hotkey_text
+from .paths import get_auto_log_path, log_error
 
 DOT_SIZE = 40
 DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS = 60
@@ -146,14 +147,27 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
 
 
 def normalize_script_data(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("Script data must be a dictionary")
+
     data["mode"] = infer_script_mode(data)
+    if data["mode"] not in ("screen", "window"):
+        data["mode"] = "screen"
+
     settings = data.setdefault("settings", {})
+    if not isinstance(settings, dict):
+        settings = data["settings"] = {}
+
     settings["window_client_area_only"] = True
     settings["enable_global_hotkeys"] = bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
     settings["default_wait_ms"] = coerce_non_negative_int(
         settings.get("default_wait_ms"), DEFAULT_WAIT_MS
     )
+
     auto = data.setdefault("auto", {})
+    if not isinstance(auto, dict):
+        auto = data["auto"] = {}
+
     auto["loop_timeout_seconds"] = coerce_non_negative_int(
         auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
     )
@@ -163,21 +177,44 @@ def normalize_script_data(data: dict) -> dict:
     auto["target_wait_seconds"] = coerce_non_negative_int(
         auto.get("target_wait_seconds"), DEFAULT_TARGET_WAIT_SECONDS
     )
+
     hotkeys = settings.setdefault("hotkeys", {})
+    if not isinstance(hotkeys, dict):
+        hotkeys = settings["hotkeys"] = {}
+
     for action, default in DEFAULT_HOTKEYS.items():
         hotkeys[action] = normalize_hotkey_text(hotkeys.get(action, default))
 
     for collection_name in ("screen_positions", "window_positions", "actions"):
-        for action in data.get(collection_name, []):
-            normalize_mouse_action(action)
+        coll = data.get(collection_name)
+        if coll is not None:
+            if not isinstance(coll, list):
+                data[collection_name] = []
+            else:
+                for action in coll:
+                    if isinstance(action, dict):
+                        normalize_mouse_action(action)
+
+    # Ensure target_windows is a list of strings
+    tw = data.get("target_windows")
+    if tw is not None:
+        if not isinstance(tw, list):
+            data["target_windows"] = []
+        else:
+            data["target_windows"] = [str(s) for s in tw]
+
     return data
 
 
 def read_script_file(file_path: str) -> dict:
-    with open(file_path, "r", encoding="utf-8-sig") as f:
-        data = json.load(f)
-    normalize_script_data(data)
-    return data
+    try:
+        with open(file_path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        normalize_script_data(data)
+        return data
+    except Exception:
+        log_error(get_auto_log_path(), f"read_script_file({file_path})")
+        raise
 
 
 def write_script_file(file_path: str, data: dict) -> None:
@@ -190,6 +227,7 @@ def write_script_file(file_path: str, data: dict) -> None:
             json.dump(data, f, indent=4, ensure_ascii=False)
         os.replace(temp_path, file_path)
     except Exception as e:
+        log_error(get_auto_log_path(), f"write_script_file({file_path})")
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
