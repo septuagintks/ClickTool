@@ -5,7 +5,7 @@ import time
 
 from clicktool.winapi import user32, kernel32, sleep_until_deadline
 from clicktool.paths import (
-    get_auto_config_path, get_auto_log_path, write_auto_log,
+    get_auto_config_path, get_auto_log_path, write_auto_log, log_error,
     acquire_single_instance_mutex, release_single_instance_mutex,
     show_already_running_message,
 )
@@ -29,8 +29,9 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         return 2
     try:
         data = read_script_file(config_path)
-    except Exception as e:
-        write_auto_log(log_path, f"failed to read config: {e}; exit=2")
+    except Exception:
+        log_error(log_path, f"run_auto_config: failed to read config {config_path}")
+        write_auto_log(log_path, "failed to read config (see error above); exit=2")
         return 2
 
     mode = infer_script_mode(data)
