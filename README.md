@@ -74,9 +74,7 @@ Automation behavior:
 
 - **Input Injection**: Some security-sensitive applications or games may block programmatic input injection. Screen Mode uses `SendInput` (hardware simulation), which offers the best compatibility.
 
-- **Multi-Instance Logging**: If running multiple ClickTool instances simultaneously (e.g., via Task Scheduler), log file writes may occasionally interleave. For production automation, use a single instance or separate log directories.
-
-- **Log Rotation**: Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement) once they exceed 1 MB to prevent excessive disk usage.
+- **Log Rotation**: Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement with file locking) once they exceed 1 MB to prevent excessive disk usage. Multi-process log writes are protected by a dedicated lock file to prevent interleaving.
 
 - **Error Reporting**: Unexpected errors are now captured with full stack traces in the application log to aid in troubleshooting.
 
