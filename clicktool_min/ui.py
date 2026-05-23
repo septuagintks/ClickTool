@@ -430,35 +430,27 @@ class ClickerApp:
             row=1, column=0, columnspan=2, sticky="w", pady=(0, 4)
         )
 
-        # Row 2: Listbox
+        # Row 2: Treeview for Actions
         list_frame = ttk.Frame(frame)
         list_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
-        self.screen_list = tk.Listbox(
-            list_frame,
-            height=9,
-            width=56,
-            activestyle="dotbox",
-            bg="white",
-            fg="#323130",
-            selectbackground="#deecf9",
-            selectforeground="#0078d7",
-            font=("Segoe UI", 9),
-            borderwidth=1,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#d2d0ce",
-            highlightcolor="#0078d7"
-        )
-        self.screen_list.grid(row=0, column=0, sticky="nsew")
-        self.screen_list.bind("<<ListboxSelect>>", self._on_screen_list_select)
 
-        scrollbar = ttk.Scrollbar(
-            list_frame, orient="vertical", command=self.screen_list.yview
-        )
+        columns = ("#", "type", "details")
+        self.screen_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=9)
+        self.screen_tree.heading("#", text="#")
+        self.screen_tree.heading("type", text="Action")
+        self.screen_tree.heading("details", text="Details")
+        self.screen_tree.column("#", width=40, anchor="center")
+        self.screen_tree.column("type", width=100, anchor="center")
+        self.screen_tree.column("details", width=360, anchor="w")
+
+        self.screen_tree.grid(row=0, column=0, sticky="nsew")
+        self.screen_tree.bind("<<TreeviewSelect>>", self._on_screen_list_select)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.screen_tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
-        self.screen_list.config(yscrollcommand=scrollbar.set)
+        self.screen_tree.configure(yscrollcommand=scrollbar.set)
 
         # Row 3: Selected Item Properties
         prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
@@ -587,33 +579,28 @@ class ClickerApp:
             paned.paneconfigure(pt_frame, minsize=self._win_pane_min_right)
         except tk.TclError:
             pass
-        
+
         ttk.Label(pt_frame, text="Click Points (Cross-window sorting allowed)").pack(anchor="w")
-        
+
+        # List fills the remaining space; gets clipped first when vertical room runs out.
         pt_list_frame = ttk.Frame(pt_frame)
-        pt_list_frame.pack(fill="both", expand=True, pady=4)
-        
-        self.window_pt_list = tk.Listbox(
-            pt_list_frame,
-            height=12,
-            width=44,
-            bg="white",
-            fg="#323130",
-            selectbackground="#deecf9",
-            selectforeground="#0078d7",
-            font=("Segoe UI", 9),
-            borderwidth=1,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#d2d0ce",
-            highlightcolor="#0078d7"
-        )
-        self.window_pt_list.pack(side="left", fill="both", expand=True)
-        self.window_pt_list.bind("<<ListboxSelect>>", self._on_window_list_select)
-        
-        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_list.yview)
+        pt_list_frame.pack(side="top", fill="both", expand=True, pady=4)
+
+        columns = ("#", "type", "details")
+        self.window_pt_tree = ttk.Treeview(pt_list_frame, columns=columns, show="headings", height=12)
+        self.window_pt_tree.heading("#", text="#")
+        self.window_pt_tree.heading("type", text="Action")
+        self.window_pt_tree.heading("details", text="Details")
+        self.window_pt_tree.column("#", width=40, anchor="center")
+        self.window_pt_tree.column("type", width=80, anchor="center")
+        self.window_pt_tree.column("details", width=330, anchor="w")
+
+        self.window_pt_tree.pack(side="left", fill="both", expand=True)
+        self.window_pt_tree.bind("<<TreeviewSelect>>", self._on_window_list_select)
+
+        pt_scroll = ttk.Scrollbar(pt_list_frame, orient="vertical", command=self.window_pt_tree.yview)
         pt_scroll.pack(side="right", fill="y")
-        self.window_pt_list.config(yscrollcommand=pt_scroll.set)
+        self.window_pt_tree.configure(yscrollcommand=pt_scroll.set)
 
         # Add/Edit button rows (packed bottom-up too).
         pt_btn_row = ttk.Frame(pt_frame)
@@ -1035,13 +1022,13 @@ class ClickerApp:
     def _on_mouse_button_selected(self, event=None) -> None:
         current_tab = self.notebook.index(self.notebook.select())
         editing_screen = current_tab == 0 or (current_tab == 2 and self._active_mode == "screen")
-        listbox = self.screen_list if editing_screen else self.window_pt_list
+        tree = self.screen_tree if editing_screen else self.window_pt_tree
         positions = self._screen_positions if editing_screen else self._window_positions
-        sel = listbox.curselection()
+        sel = tree.selection()
         if not sel:
             return
 
-        index = sel[0]
+        index = tree.index(sel[0])
         if positions[index].get("type") != "click":
             return
 
@@ -1049,10 +1036,14 @@ class ClickerApp:
         positions[index]["button"] = button if button in MOUSE_BUTTONS else "left"
         if editing_screen:
             self._refresh_screen_list()
-            self.screen_list.selection_set(index)
+            items = self.screen_tree.get_children()
+            if 0 <= index < len(items):
+                self.screen_tree.selection_set(items[index])
         else:
             self._refresh_window_pt_list()
-            self.window_pt_list.selection_set(index)
+            items = self.window_pt_tree.get_children()
+            if 0 <= index < len(items):
+                self.window_pt_tree.selection_set(items[index])
 
     def add_screen_dot(self, at_cursor: bool = False) -> None:
         """Create a new draggable dot at the cursor or screen center."""
@@ -1082,10 +1073,10 @@ class ClickerApp:
             "dot": dot
         })
         self._refresh_screen_list()
-        last_idx = len(self._screen_positions) - 1
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(last_idx)
-        self.screen_list.activate(last_idx)
+        # Select the newly added dot
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self.status_var.set(f"Added screen dot at ({x}, {y}).")
 
@@ -1117,10 +1108,9 @@ class ClickerApp:
             "dot": dot
         })
         self._refresh_screen_list()
-        last_idx = len(self._screen_positions) - 1
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(last_idx)
-        self.screen_list.activate(last_idx)
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self.status_var.set(f"Added screen wheel action at ({x}, {y}).")
 
@@ -1134,10 +1124,9 @@ class ClickerApp:
             "ms": wait_ms,
         })
         self._refresh_screen_list()
-        last_idx = len(self._screen_positions) - 1
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(last_idx)
-        self.screen_list.activate(last_idx)
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self.status_var.set(f"Added {wait_ms}ms wait.")
 
@@ -1154,10 +1143,9 @@ class ClickerApp:
             "delay": None,
         })
         self._refresh_screen_list()
-        last_idx = len(self._screen_positions) - 1
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(last_idx)
-        self.screen_list.activate(last_idx)
+        last_item = self.screen_tree.get_children()[-1]
+        self.screen_tree.selection_set(last_item)
+        self.screen_tree.see(last_item)
         self._on_screen_list_select()
         self._begin_key_capture("screen")
         self.status_var.set("Press a key combination...")
@@ -1165,10 +1153,11 @@ class ClickerApp:
     def _on_screen_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
         self.notebook.select(0) # Ensure screen tab is active
-        self.screen_list.selection_clear(0, "end")
-        self.screen_list.selection_set(index)
-        self.screen_list.activate(index)
-        self._on_screen_list_select()
+        items = self.screen_tree.get_children()
+        if 0 <= index < len(items):
+            self.screen_tree.selection_set(items[index])
+            self.screen_tree.see(items[index])
+            self._on_screen_list_select()
 
     def _on_screen_dot_move(self, index, x, y):
         """Callback when a screen dot is dragged."""
@@ -1177,11 +1166,12 @@ class ClickerApp:
         self._refresh_screen_list_item(index)
 
     def _on_screen_list_select(self, event=None):
-        """Update the property fields when a position is selected in the screen list."""
-        sel = self.screen_list.curselection()
+        """Update the property fields when a position is selected in the screen tree."""
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        pos = self._screen_positions[sel[0]]
+        index = self.screen_tree.index(sel[0])
+        pos = self._screen_positions[index]
         if pos["type"] == "click":
             self._show_screen_key_entry(False)
             self._show_screen_button_row(True)
@@ -1217,20 +1207,20 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
 
     def remove_screen_position(self) -> None:
-        sel = self.screen_list.curselection()
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.screen_tree.index(sel[0])
         if is_position_action(self._screen_positions[index]) and "dot" in self._screen_positions[index]:
             self._screen_positions[index]["dot"].destroy()
         del self._screen_positions[index]
         self._refresh_screen_list()
 
     def move_screen_position(self, delta: int) -> None:
-        sel = self.screen_list.curselection()
+        sel = self.screen_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.screen_tree.index(sel[0])
         target = index + delta
         if not 0 <= target < len(self._screen_positions):
             return
@@ -1241,8 +1231,9 @@ class ClickerApp:
         )
 
         self._refresh_screen_list()
-        self.screen_list.selection_set(target)
-        self.screen_list.activate(target)
+        new_items = self.screen_tree.get_children()
+        self.screen_tree.selection_set(new_items[target])
+        self.screen_tree.see(new_items[target])
         self._on_screen_list_select()
 
     def clear_screen_positions(self) -> None:
@@ -1253,7 +1244,9 @@ class ClickerApp:
         self._refresh_screen_list()
 
     def _refresh_screen_list(self) -> None:
-        self.screen_list.delete(0, "end")
+        for item in self.screen_tree.get_children():
+            self.screen_tree.delete(item)
+
         dot_count = 0
         for i, item in enumerate(self._screen_positions):
             if is_position_action(item):
@@ -1261,31 +1254,38 @@ class ClickerApp:
                 if "dot" in item:
                     item["dot"].index = i
                     item["dot"].set_number(dot_count)
-                self.screen_list.insert(
+                self.screen_tree.insert(
+                    "",
                     "end",
-                    f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item)}",
+                    values=(dot_count, get_mouse_action_name(item), get_mouse_action_details(item)),
+                )
+            elif item.get("type") == "key":
+                self.screen_tree.insert(
+                    "",
+                    "end",
+                    values=("", get_mouse_action_name(item), get_mouse_action_details(item)),
                 )
             else:
-                self.screen_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
+                details = f"Delay: {item['ms']}ms"
+                self.screen_tree.insert("", "end", values=("", "Wait", details))
 
-    def _refresh_screen_list_item(self, index, append=False):
+    def _refresh_screen_list_item(self, index: int) -> None:
         if not (0 <= index < len(self._screen_positions)):
             return
-        if index >= self.screen_list.size():
+        items = self.screen_tree.get_children()
+        if not (0 <= index < len(items)):
             self._refresh_screen_list()
             return
         item = self._screen_positions[index]
+        item_id = items[index]
         if is_position_action(item):
-            dot_count = sum(1 for p in self._screen_positions[: index + 1] if is_position_action(p))
-            text = f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item)}"
+            self.screen_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.screen_tree.set(item_id, "details", get_mouse_action_details(item))
+        elif item.get("type") == "key":
+            self.screen_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.screen_tree.set(item_id, "details", get_mouse_action_details(item))
         else:
-            text = f"   Wait: {item.get('ms', 0)}ms"
-        had_selection = index in (self.screen_list.curselection() or ())
-        self.screen_list.delete(index)
-        self.screen_list.insert(index, text)
-        if had_selection:
-            self.screen_list.selection_set(index)
-            self.screen_list.activate(index)
+            self.screen_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
     def add_window_dot(self, at_cursor: bool = False) -> None:
         """Create a new draggable dot for the selected window."""
@@ -1347,10 +1347,10 @@ class ClickerApp:
             "win_title": win_data["title"]
         })
         self._refresh_window_pt_list()
-        last_idx = len(self._window_positions) - 1
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(last_idx)
-        self.window_pt_list.activate(last_idx)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
+        self._on_window_list_select()
 
         # Keep focus on window list as requested
         self.target_win_list.selection_set(win_idx)
@@ -1417,10 +1417,10 @@ class ClickerApp:
             "win_title": win_data["title"]
         })
         self._refresh_window_pt_list()
-        last_idx = len(self._window_positions) - 1
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(last_idx)
-        self.window_pt_list.activate(last_idx)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
+        self._on_window_list_select()
 
         self.target_win_list.selection_set(win_idx)
         self.target_win_list.activate(win_idx)
@@ -1437,10 +1437,9 @@ class ClickerApp:
             "ms": wait_ms,
         })
         self._refresh_window_pt_list()
-        last_idx = len(self._window_positions) - 1
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(last_idx)
-        self.window_pt_list.activate(last_idx)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
         self._on_window_list_select()
         self.status_var.set(f"Added {wait_ms}ms wait.")
 
@@ -1472,22 +1471,23 @@ class ClickerApp:
             "win_title": win_data["title"]
         })
         self._refresh_window_pt_list()
-        last_idx = len(self._window_positions) - 1
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(last_idx)
-        self.window_pt_list.activate(last_idx)
+        last_item = self.window_pt_tree.get_children()[-1]
+        self.window_pt_tree.selection_set(last_item)
+        self.window_pt_tree.see(last_item)
         self._on_window_list_select()
+        self._begin_key_capture("window")
+        self.status_var.set("Press a key combination...")
         self._begin_key_capture("window")
         self.status_var.set("Press a key combination...")
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
         self.notebook.select(1) # Ensure window tab is active
-        self.window_pt_list.selection_clear(0, "end")
-        self.window_pt_list.selection_set(index)
-        self.window_pt_list.activate(index)
-        self.window_pt_list.see(index)
-        self._on_window_list_select()
+        items = self.window_pt_tree.get_children()
+        if 0 <= index < len(items):
+            self.window_pt_tree.selection_set(items[index])
+            self.window_pt_tree.see(items[index])
+            self._on_window_list_select()
 
     def _on_window_dot_move(self, index, x, y):
         """Callback when a window dot is dragged (x, y are relative)."""
@@ -1496,11 +1496,12 @@ class ClickerApp:
         self._refresh_window_pt_item(index)
 
     def _on_window_list_select(self, event=None):
-        """Update the property fields when a position is selected in the window point list."""
-        sel = self.window_pt_list.curselection()
+        """Update the property fields when a position is selected in the window point tree."""
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        pos = self._window_positions[sel[0]]
+        index = self.window_pt_tree.index(sel[0])
+        pos = self._window_positions[index]
         if pos["type"] == "click":
             self._show_window_key_entry(False)
             self._show_window_button_row(True)
@@ -1536,20 +1537,20 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
 
     def remove_window_position(self) -> None:
-        sel = self.window_pt_list.curselection()
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.window_pt_tree.index(sel[0])
         if is_position_action(self._window_positions[index]) and "dot" in self._window_positions[index]:
             self._window_positions[index]["dot"].destroy()
         del self._window_positions[index]
         self._refresh_window_pt_list()
 
     def move_window_position(self, delta: int) -> None:
-        sel = self.window_pt_list.curselection()
+        sel = self.window_pt_tree.selection()
         if not sel:
             return
-        index = sel[0]
+        index = self.window_pt_tree.index(sel[0])
         target = index + delta
         if not 0 <= target < len(self._window_positions):
             return
@@ -1560,8 +1561,9 @@ class ClickerApp:
         )
 
         self._refresh_window_pt_list()
-        self.window_pt_list.selection_set(target)
-        self.window_pt_list.activate(target)
+        new_items = self.window_pt_tree.get_children()
+        self.window_pt_tree.selection_set(new_items[target])
+        self.window_pt_tree.see(new_items[target])
         self._on_window_list_select()
 
     def clear_window_positions(self) -> None:
@@ -1572,7 +1574,9 @@ class ClickerApp:
         self._refresh_window_pt_list()
 
     def _refresh_window_pt_list(self) -> None:
-        self.window_pt_list.delete(0, "end")
+        for item in self.window_pt_tree.get_children():
+            self.window_pt_tree.delete(item)
+
         dot_count = 0
         for i, item in enumerate(self._window_positions):
             if is_position_action(item):
@@ -1580,52 +1584,57 @@ class ClickerApp:
                 if "dot" in item:
                     item["dot"].index = i
                     item["dot"].set_number(dot_count)
-                title = item.get('win_title', '')
-                short = (title[:15] + '..') if len(title) > 15 else title
-                self.window_pt_list.insert(
-                    "end",
-                    f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item, short)}",
-                )
+                title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
+                details = get_mouse_action_details(item, title)
+                self.window_pt_tree.insert("", "end", values=(dot_count, get_mouse_action_name(item), details))
+            elif item.get("type") == "key":
+                raw_title = item.get('win_title') or ''
+                title = (raw_title[:15] + '..') if len(raw_title) > 15 else raw_title
+                details = get_mouse_action_details(item, title)
+                self.window_pt_tree.insert("", "end", values=("", get_mouse_action_name(item), details))
             else:
-                self.window_pt_list.insert("end", f"   Wait: {item.get('ms', 0)}ms")
+                details = f"Delay: {item['ms']}ms"
+                self.window_pt_tree.insert("", "end", values=("", "Wait", details))
 
-    def _refresh_window_pt_item(self, index, append=False):
+    def _refresh_window_pt_item(self, index: int) -> None:
         if not (0 <= index < len(self._window_positions)):
             return
-        if index >= self.window_pt_list.size():
+        items = self.window_pt_tree.get_children()
+        if not (0 <= index < len(items)):
             self._refresh_window_pt_list()
             return
         item = self._window_positions[index]
+        item_id = items[index]
         if is_position_action(item):
-            dot_count = sum(1 for p in self._window_positions[: index + 1] if is_position_action(p))
             title = item.get('win_title', '') or ''
             short = (title[:15] + '..') if len(title) > 15 else title
-            text = f"{dot_count}: {get_mouse_action_name(item)} - {get_mouse_action_details(item, short)}"
+            self.window_pt_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.window_pt_tree.set(item_id, "details", get_mouse_action_details(item, short))
+        elif item.get("type") == "key":
+            title = item.get('win_title', '') or ''
+            short = (title[:15] + '..') if len(title) > 15 else title
+            self.window_pt_tree.set(item_id, "type", get_mouse_action_name(item))
+            self.window_pt_tree.set(item_id, "details", get_mouse_action_details(item, short))
         else:
-            text = f"   Wait: {item.get('ms', 0)}ms"
-        had_selection = index in (self.window_pt_list.curselection() or ())
-        self.window_pt_list.delete(index)
-        self.window_pt_list.insert(index, text)
-        if had_selection:
-            self.window_pt_list.selection_set(index)
-            self.window_pt_list.activate(index)
+            self.window_pt_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
     def apply_step_delay(self):
         """Save the parameters and custom delay for the selected position in either mode."""
         current_tab = self.notebook.index(self.notebook.select())
         editing_screen = current_tab == 0 or (current_tab == 2 and self._active_mode == "screen")
         if editing_screen:
-            sel = self.screen_list.curselection()
+            sel = self.screen_tree.selection()
             positions = self._screen_positions
         else:
-            sel = self.window_pt_list.curselection()
+            sel = self.window_pt_tree.selection()
             positions = self._window_positions
 
         if not sel:
             messagebox.showinfo("Selection Required", "Select a position first.")
             return
 
-        index = sel[0]
+        tree = self.screen_tree if editing_screen else self.window_pt_tree
+        index = tree.index(sel[0])
         val = self.step_delay_var.get().strip()
         ptype = positions[index].get("type", "click")
 
@@ -1690,10 +1699,10 @@ class ClickerApp:
 
         if editing_screen:
             self._refresh_screen_list()
-            self.screen_list.selection_set(index)
+            self.screen_tree.selection_set(index)
         else:
             self._refresh_window_pt_list()
-            self.window_pt_list.selection_set(index)
+            self.window_pt_tree.selection_set(index)
         self.status_var.set(f"Updated item {index+1}.")
 
     def apply_defaults(self) -> None:
@@ -1856,14 +1865,14 @@ class ClickerApp:
             return 0
 
     def _begin_key_capture(self, mode: str) -> None:
-        listbox = self.screen_list if mode == "screen" else self.window_pt_list
+        tree = self.screen_tree if mode == "screen" else self.window_pt_tree
         positions = self._screen_positions if mode == "screen" else self._window_positions
-        sel = listbox.curselection()
+        sel = tree.selection()
         if not sel:
             self._capturing_key = False
             self._key_capture_index = None
             return
-        index = sel[0]
+        index = tree.index(sel[0])
         if not (0 <= index < len(positions)) or positions[index].get("type") != "key":
             self._capturing_key = False
             self._key_capture_index = None
@@ -1874,8 +1883,10 @@ class ClickerApp:
         self._reset_key_combo_state()
         entry = self._key_entry_for_mode(mode)
         if entry:
+            entry.configure(state="normal")
             entry.delete(0, tk.END)
             entry.insert(0, "press the combo, then release all keys")
+            entry.configure(state="readonly")
         self._install_kb_hook()
 
     def _end_key_capture(self) -> None:
@@ -2038,14 +2049,6 @@ class ClickerApp:
     def _refresh_key_entry_text(self, mode: str, action: dict) -> None:
         text = format_key_combo(action) or "(press a key)"
         self._set_key_entry_text(mode, text)
-            parts = list(self._key_combo_modifiers)
-            if self._key_combo_main:
-                parts.append(self._key_combo_main)
-            text = "+".join(parts) if parts else "(press a key)"
-        else:
-            text = format_combo(action.get("modifiers", []), action.get("key_name", "")) or "(empty)"
-
-        self._set_key_entry_text(text)
 
     def start_clicking(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
