@@ -58,6 +58,14 @@ Automation behavior:
 - Exits automatically when the saved run finishes.
 - If the saved config has **Loop** enabled, automation stops at the first reached safety limit: default `60` seconds or `3` completed rounds.
 
+## Caveats & Warnings
+
+- **Background Clicking**: Window Mode uses `PostMessage` for background clicks. While effective for many standard Windows apps, some applications (especially those using custom UI frameworks, hardware acceleration, or anti-cheat) may ignore background messages. If background clicking fails, try using **Screen Mode**.
+- **Keyboard Capture**: When recording a Key action, ClickTool installs a low-level keyboard hook. This **temporarily suppresses all system hotkeys** (like `Win+R` or `Alt+Tab`) to ensure the combination is captured correctly. Normal system behavior restores automatically once you release all keys or click away from the input box.
+- **Input Injection**: Some security-sensitive applications or games may block programmatic input injection. Screen Mode uses `SendInput` (hardware simulation), which offers the best compatibility.
+- **Log Rotation**: Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement) once they exceed 1 MB to prevent excessive disk usage.
+- **Error Reporting**: Unexpected errors are now captured with full stack traces in the application log to aid in troubleshooting.
+
 ## Features
 
 ### 1. Screen Mode

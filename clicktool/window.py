@@ -228,7 +228,7 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
                     target_hwnd = child_hwnd
                     best_area = area
         except Exception:
-            pass
+            log_error(get_auto_log_path(), f"EnumChildWindows callback for {child_hwnd}")
         return True
 
     win32gui.EnumChildWindows(hwnd, enum_cb, None)
@@ -251,7 +251,7 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     try:
         win32gui.SetForegroundWindow(hwnd)
     except Exception:
-        pass
+        log_error(get_auto_log_path(), f"SetForegroundWindow({hwnd})")
     fallback_action = dict(action)
     fallback_action["x"] = sx
     fallback_action["y"] = sy

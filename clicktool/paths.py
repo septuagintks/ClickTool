@@ -34,9 +34,7 @@ def write_auto_log(log_path: str | None, message: str) -> None:
     try:
         if os.path.exists(log_path) and os.path.getsize(log_path) > 1024 * 1024:
             old_path = log_path + ".old"
-            if os.path.exists(old_path):
-                os.remove(old_path)
-            os.rename(log_path, old_path)
+            os.replace(log_path, old_path)
     except OSError as e:
         try:
             print(f"[ClickTool] log rotate failed for {log_path}: {e}", file=sys.stderr)
@@ -51,6 +49,11 @@ def write_auto_log(log_path: str | None, message: str) -> None:
             print(f"[ClickTool] log write failed for {log_path}: {e}", file=sys.stderr)
         except OSError:
             pass
+
+
+def log_error(log_path: str | None, context: str) -> None:
+    import traceback
+    write_auto_log(log_path, f"ERROR in {context}:\n{traceback.format_exc()}")
 
 
 def acquire_single_instance_mutex() -> int | None:

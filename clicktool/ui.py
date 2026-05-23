@@ -35,7 +35,7 @@ from .window import (
     perform_screen_mouse_action, perform_window_mouse_action,
     perform_screen_key_action, perform_window_key_action,
 )
-from .paths import get_auto_config_path
+from .paths import get_auto_config_path, get_auto_log_path, log_error
 
 ROOT_MIN_WIDTH = 820
 ROOT_MIN_HEIGHT = 520
@@ -1129,6 +1129,7 @@ class ClickerApp:
             try:
                 x, y = win32api.GetCursorPos()
             except Exception:
+                log_error(get_auto_log_path(), "Getting cursor position for screen dot")
                 pass
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
@@ -1162,6 +1163,7 @@ class ClickerApp:
             try:
                 x, y = win32api.GetCursorPos()
             except Exception:
+                log_error(get_auto_log_path(), "Getting cursor position for screen wheel")
                 pass
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
@@ -1474,6 +1476,7 @@ class ClickerApp:
                 if 0 <= rx <= win_w and 0 <= ry <= win_h:
                     rel_x, rel_y = rx, ry
             except Exception:
+                log_error(get_auto_log_path(), "Getting cursor position for window action")
                 pass
                 
         if rel_x is None or rel_y is None:
@@ -1773,7 +1776,7 @@ class ClickerApp:
         self._key_capture_mode = mode
         self._key_capture_index = index
         self._reset_key_combo_state()
-        self._set_key_entry_text(mode, "press the combo, then release all keys")
+        self._set_key_entry_text(mode, "press combo (SYSTEM HOTKEYS SUPPRESSED), then release all")
         self._install_kb_hook()
 
     def _end_key_capture(self) -> None:
@@ -1797,8 +1800,12 @@ class ClickerApp:
                     # Marshal into the Tk thread; swallow the key so the OS
                     # doesn't act on Win+R, Win+E, Alt+Tab, etc.
                     self._safe_after(self._on_low_level_key, vk, is_up, scan, is_extended)
+                    # We return 1 to swallow the event so system hotkeys like Win+D or Alt+Tab
+                    # don't trigger during capture, but this risks disrupting normal OS use 
+                    # if the hook isn't uninstalled properly.
                     return 1  # non-zero == handled/suppressed
             except Exception:
+                log_error(get_auto_log_path(), "Processing low-level keyboard hook")
                 pass
             return user32.CallNextHookEx(self._kb_hook_handle, nCode, wParam, lParam)
 
@@ -1818,6 +1825,7 @@ class ClickerApp:
             try:
                 user32.UnhookWindowsHookEx(handle)
             except Exception:
+                log_error(get_auto_log_path(), "Uninstalling keyboard hook")
                 pass
         self._kb_hook_handle = None
         self._kb_hook_proc = None
@@ -2519,6 +2527,7 @@ class ClickerApp:
             try:
                 hotkey_map = dict(self._hotkey_map)
             except Exception:
+                log_error(get_auto_log_path(), "Copying hotkey map in global watcher")
                 continue
 
             now = time.monotonic()
