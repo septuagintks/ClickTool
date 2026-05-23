@@ -1837,10 +1837,22 @@ class ClickerApp:
                 result = user32.UnhookWindowsHookEx(handle)
                 unhook_success = bool(result)
                 if not unhook_success:
+                    # UnhookWindowsHookEx returned False - this is a failure
+                    last_error = kernel32.GetLastError()
                     log_path = get_auto_log_path()
-                    write_auto_log(log_path, f"WARNING: UnhookWindowsHookEx returned False (PID={os.getpid()}, TID={threading.get_ident()})")
+                    write_auto_log(log_path, f"CRITICAL: UnhookWindowsHookEx returned False, GetLastError={last_error} (PID={os.getpid()}, TID={threading.get_ident()})")
+                    self._safe_after(
+                        lambda: messagebox.showerror(
+                            "Critical: Keyboard Hook Uninstall Failed",
+                            "Failed to uninstall the keyboard hook!\n\n"
+                            "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
+                            "Please restart ClickTool immediately. If the issue persists, restart your computer."
+                        )
+                    )
+                    # Do NOT clear the handle references - keep them so we know the hook is still active
+                    return
             except Exception:
-                log_error(get_auto_log_path(), "Uninstalling keyboard hook")
+                log_error(get_auto_log_path(), "Uninstalling keyboard hook (exception)")
                 self._safe_after(
                     lambda: messagebox.showerror(
                         "Critical: Keyboard Hook Uninstall Failed",
@@ -1849,6 +1861,9 @@ class ClickerApp:
                         "Please restart ClickTool immediately. If the issue persists, restart your computer."
                     )
                 )
+                # Do NOT clear the handle references on exception either
+                return
+        # Only clear references if unhook succeeded or there was no handle
         self._kb_hook_handle = None
         self._kb_hook_proc = None
 
