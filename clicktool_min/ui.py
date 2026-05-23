@@ -1,4 +1,5 @@
 import ctypes
+import os
 import threading
 import time
 import tkinter as tk
@@ -1810,17 +1811,65 @@ class ClickerApp:
             hmod = kernel32.GetModuleHandleW(None)
             self._kb_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, hmod, 0)
             self._kb_hook_proc = hook_proc
+            if not self._kb_hook:
+                # Hook install failed
+                log_path = get_auto_log_path()
+                write_auto_log(log_path, f"WARNING: Keyboard hook installation failed (PID={os.getpid()}, TID={threading.get_ident()})")
+                self._safe_after(
+                    lambda: messagebox.showwarning(
+                        "Keyboard Hook Failed",
+                        "Failed to install keyboard hook for system-wide key capture.\n\n"
+                        "Key recording will only work when ClickTool has focus.\n"
+                        "If this persists, try restarting the application."
+                    )
+                )
         except Exception:
             log_error(get_auto_log_path(), "Installing keyboard hook")
+            self._safe_after(
+                lambda: messagebox.showwarning(
+                    "Keyboard Hook Failed",
+                    "Failed to install keyboard hook for system-wide key capture.\n\n"
+                    "Key recording will only work when ClickTool has focus.\n"
+                    "If this persists, try restarting the application."
+                )
+            )
 
     def _uninstall_kb_hook(self) -> None:
         if self._kb_hook:
+            unhook_success = False
             try:
-                user32.UnhookWindowsHookEx(self._kb_hook)
+                result = user32.UnhookWindowsHookEx(self._kb_hook)
+                unhook_success = bool(result)
+                if not unhook_success:
+                    # UnhookWindowsHookEx returned False - this is a failure
+                    last_error = kernel32.GetLastError()
+                    log_path = get_auto_log_path()
+                    write_auto_log(log_path, f"CRITICAL: UnhookWindowsHookEx returned False, GetLastError={last_error} (PID={os.getpid()}, TID={threading.get_ident()})")
+                    self._safe_after(
+                        lambda: messagebox.showerror(
+                            "Critical: Keyboard Hook Uninstall Failed",
+                            "Failed to uninstall the keyboard hook!\n\n"
+                            "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
+                            "Please restart ClickTool immediately. If the issue persists, restart your computer."
+                        )
+                    )
+                    # Do NOT clear the handle references - keep them so we know the hook is still active
+                    return
             except Exception:
-                log_error(get_auto_log_path(), "Uninstalling keyboard hook")
-            self._kb_hook = None
-            self._kb_hook_proc = None
+                log_error(get_auto_log_path(), "Uninstalling keyboard hook (exception)")
+                self._safe_after(
+                    lambda: messagebox.showerror(
+                        "Critical: Keyboard Hook Uninstall Failed",
+                        "Failed to uninstall the keyboard hook!\n\n"
+                        "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
+                        "Please restart ClickTool immediately. If the issue persists, restart your computer."
+                    )
+                )
+                # Do NOT clear the handle references on exception either
+                return
+        # Only clear references if unhook succeeded or there was no handle
+        self._kb_hook = None
+        self._kb_hook_proc = None
 
     def _on_low_level_key(self, nCode, wParam, lParam) -> int:
         if nCode == HC_ACTION and self._capturing_key:

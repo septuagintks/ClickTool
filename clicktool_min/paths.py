@@ -1,5 +1,6 @@
 import os
 import sys
+import msvcrt
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -35,19 +36,40 @@ def get_auto_log_path() -> str:
 def write_auto_log(log_path: str | None, message: str) -> None:
     if not log_path:
         return
-    try:
-        if os.path.exists(log_path) and os.path.getsize(log_path) > 1024 * 1024:
-            old_path = log_path + ".old"
-            os.replace(log_path, old_path)
-    except OSError as e:
-        try:
-            print(f"[ClickTool] log rotate failed for {log_path}: {e}", file=sys.stderr)
-        except OSError:
-            pass
+
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_dir = os.path.dirname(log_path)
+    lock_path = os.path.join(log_dir, ".auto-minified.log.lock")
+
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {message}\n")
+        # Create lock file and acquire exclusive lock
+        # This ensures all operations (rotation check, write) are atomic across processes
+        os.makedirs(log_dir, exist_ok=True)
+        with open(lock_path, "a", encoding="utf-8") as lock_file:
+            try:
+                # Lock the entire lock file (byte 0, length 1)
+                # This creates a global mutex across all processes
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    # Now we have exclusive access - check rotation and write
+                    if os.path.exists(log_path) and os.path.getsize(log_path) > 1024 * 1024:
+                        old_path = log_path + ".old"
+                        os.replace(log_path, old_path)
+
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(f"[{timestamp}] {message}\n")
+                        f.flush()
+                finally:
+                    # Unlock
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            except (OSError, IOError) as lock_err:
+                # Lock acquisition failed - this should be rare
+                # Fall back to best-effort write without lock
+                try:
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(f"[{timestamp}] {message} [WARN: written without lock]\n")
+                except OSError:
+                    pass
     except OSError as e:
         try:
             print(f"[ClickTool] log write failed for {log_path}: {e}", file=sys.stderr)

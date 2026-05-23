@@ -49,10 +49,22 @@ Automation behavior:
 
 ## Caveats & Warnings
 
+- **Elevated Process Limitations**: ClickTool **cannot inject input into processes running with higher privileges** than itself. This includes:
+  - Applications launched as Administrator (elevated/UAC)
+  - UAC consent dialogs and system security prompts
+  - Windows Store apps (UWP) with AppContainer isolation
+  - System services and protected processes
+  
+  **Workaround**: Run ClickTool as Administrator to match the target's privilege level, or use Screen Mode which may have better compatibility in some scenarios. Note that even with elevated privileges, some system-protected windows remain inaccessible.
+
 - **Background Clicking**: Window Mode uses `PostMessage` for background clicks. This build is **client-area only** and does not support title-bar or border clicks in background mode. Some applications may ignore background messages entirely.
-- **Keyboard Capture**: When recording a Key action, ClickTool installs a low-level keyboard hook. This **temporarily suppresses all system hotkeys** (like `Win+R` or `Alt+Tab`) to ensure the combination is captured correctly. Normal system behavior restores automatically once you release all keys or click away from the input box.
+
+- **Keyboard Capture**: When recording a Key action, ClickTool installs a low-level keyboard hook. This **temporarily suppresses all system hotkeys** (like `Win+R` or `Alt+Tab`) to ensure the combination is captured correctly. Normal system behavior restores automatically once you release all keys or click away from the input box. **If the application crashes during capture, restart your computer to restore normal keyboard behavior.**
+
 - **Input Injection**: Some security-sensitive applications or games may block programmatic input injection. Screen Mode uses `SendInput` (hardware simulation), which offers the best compatibility.
-- **Log Rotation**: Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement) once they exceed 1 MB.
+
+- **Log Rotation**: Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement with file locking) once they exceed 1 MB to prevent excessive disk usage.
+
 - **Error Reporting**: Unexpected errors are now captured with full stack traces in the application log to aid in troubleshooting.
 
 ## Features

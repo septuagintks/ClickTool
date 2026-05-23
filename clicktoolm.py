@@ -29,8 +29,10 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         return 2
     try:
         data = read_script_file(config_path)
-    except Exception as e:
-        write_auto_log(log_path, f"failed to read config: {e}; exit=2")
+    except Exception:
+        # read_script_file already logged the full stack trace via log_error()
+        # Just log the exit code here to avoid duplicate stack traces
+        write_auto_log(log_path, "failed to read config (see error above); exit=2")
         return 2
 
     mode = infer_script_mode(data)
