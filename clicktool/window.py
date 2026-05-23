@@ -217,6 +217,7 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     sy = int(rect[1] + y)
     target_hwnd = hwnd
     best_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+    enum_errors: list[tuple[int, Exception]] = []
 
     def enum_cb(child_hwnd, lparam):
         nonlocal target_hwnd, best_area
@@ -227,11 +228,17 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
                 if area < best_area:
                     target_hwnd = child_hwnd
                     best_area = area
-        except Exception:
-            log_error(get_auto_log_path(), f"EnumChildWindows callback for {child_hwnd}")
+        except Exception as e:
+            enum_errors.append((child_hwnd, e))
         return True
 
     win32gui.EnumChildWindows(hwnd, enum_cb, None)
+
+    # Log any errors that occurred during enumeration (outside callback context)
+    if enum_errors:
+        from .paths import log_error, get_auto_log_path
+        for child_hwnd, exc in enum_errors:
+            log_error(get_auto_log_path(), f"EnumChildWindows callback for {child_hwnd}")
 
     t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
     tx = int(sx - t_cl_tl_sx)
