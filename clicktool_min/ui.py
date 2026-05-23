@@ -489,7 +489,7 @@ class ClickerApp:
 
         ttk.Label(
             prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
@@ -644,7 +644,7 @@ class ClickerApp:
 
         ttk.Label(
             win_prop_frame,
-            text="Click: x,y + button; Wheel: x,y,delta; Wait: ms",
+            text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w")
@@ -1151,7 +1151,7 @@ class ClickerApp:
         pos = self._screen_positions[sel[0]]
         ptype = pos.get("type", "click")
         if ptype == "click":
-            self.screen_prop_label.config(text="Pos (x,y):")
+            self.screen_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1159,7 +1159,7 @@ class ClickerApp:
             self._set_button_controls_enabled(True)
             self._hide_key_entry()
         elif ptype == "wheel":
-            self.screen_prop_label.config(text="Wheel (x,y,delta):")
+            self.screen_prop_label.config(text="Wheel:")
             self.step_delay_var.set(
                 f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
             )
@@ -1174,7 +1174,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
             self._refresh_key_entry_text(sel[0], "screen")
         else:
-            self.screen_prop_label.config(text="Wait (ms):")
+            self.screen_prop_label.config(text="Wait:")
             self.step_delay_var.set(str(pos.get("ms", 0)))
             self.custom_delay_var.set("")
             self.screen_custom_delay_entry.config(state="disabled")
@@ -1468,7 +1468,7 @@ class ClickerApp:
         pos = self._window_positions[sel[0]]
         ptype = pos.get("type", "click")
         if ptype == "click":
-            self.window_prop_label.config(text="Pos (x,y):")
+            self.window_prop_label.config(text="Pos:")
             self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
@@ -1476,7 +1476,7 @@ class ClickerApp:
             self._set_button_controls_enabled(True)
             self._hide_key_entry()
         elif ptype == "wheel":
-            self.window_prop_label.config(text="Wheel (x,y,delta):")
+            self.window_prop_label.config(text="Wheel:")
             self.step_delay_var.set(
                 f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}"
             )
@@ -1491,7 +1491,7 @@ class ClickerApp:
             self._set_button_controls_enabled(False)
             self._refresh_key_entry_text(sel[0], "window")
         else:
-            self.window_prop_label.config(text="Wait (ms):")
+            self.window_prop_label.config(text="Wait:")
             self.step_delay_var.set(str(pos.get("ms", 0)))
             self.custom_delay_var.set("")
             self.window_custom_delay_entry.config(state="disabled")
