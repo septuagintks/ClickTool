@@ -600,6 +600,29 @@ class ClickerApp:
         
         ttk.Label(pt_frame, text="Click Points (Cross-window sorting allowed)").pack(anchor="w")
 
+        # Add/Edit button rows (packed bottom-up too).
+        pt_btn_row = ttk.Frame(pt_frame)
+        pt_btn_row.pack(side="bottom", fill="x", pady=(10, 0))
+        pt_btn_row.columnconfigure(0, weight=1)
+
+        add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
+        add_group.grid(row=0, column=0, sticky="ew")
+        for i in range(4):
+            add_group.columnconfigure(i, weight=1, uniform="window_add")
+        ttk.Button(add_group, text="Dot", command=self.add_window_dot).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Key", command=self.add_window_key).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(add_group, text="Wait", command=self.add_window_wait).grid(row=0, column=3, padx=2, sticky="ew")
+
+        edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
+        edit_group.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        for i in range(4):
+            edit_group.columnconfigure(i, weight=1, uniform="window_edit")
+        ttk.Button(edit_group, text="Remove", command=self.remove_window_position).grid(row=0, column=0, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Up", command=lambda: self.move_window_position(-1)).grid(row=0, column=1, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Down", command=lambda: self.move_window_position(1)).grid(row=0, column=2, padx=2, sticky="ew")
+        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions).grid(row=0, column=3, padx=2, sticky="ew")
+
         # Selected Item Properties (packed bottom first so it survives shrinking).
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
         win_prop_frame.pack(side="bottom", fill="x", pady=(8, 0))
@@ -643,29 +666,6 @@ class ClickerApp:
             font=("", 8),
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
-
-        # Add/Edit button rows (packed bottom-up too).
-        pt_btn_row = ttk.Frame(pt_frame)
-        pt_btn_row.pack(side="bottom", fill="x")
-        pt_btn_row.columnconfigure(0, weight=1)
-
-        add_group = ttk.LabelFrame(pt_btn_row, text="Add", padding=(6, 4))
-        add_group.grid(row=0, column=0, sticky="ew")
-        for i in range(4):
-            add_group.columnconfigure(i, weight=1, uniform="window_add")
-        ttk.Button(add_group, text="Dot", command=self.add_window_dot).grid(row=0, column=0, padx=2, sticky="ew")
-        ttk.Button(add_group, text="Wheel", command=self.add_window_wheel).grid(row=0, column=1, padx=2, sticky="ew")
-        ttk.Button(add_group, text="Key", command=self.add_window_key).grid(row=0, column=2, padx=2, sticky="ew")
-        ttk.Button(add_group, text="Wait", command=self.add_window_wait).grid(row=0, column=3, padx=2, sticky="ew")
-
-        edit_group = ttk.LabelFrame(pt_btn_row, text="Edit", padding=(6, 4))
-        edit_group.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        for i in range(4):
-            edit_group.columnconfigure(i, weight=1, uniform="window_edit")
-        ttk.Button(edit_group, text="Remove", command=self.remove_window_position).grid(row=0, column=0, padx=2, sticky="ew")
-        ttk.Button(edit_group, text="Up", command=lambda: self.move_window_position(-1)).grid(row=0, column=1, padx=2, sticky="ew")
-        ttk.Button(edit_group, text="Down", command=lambda: self.move_window_position(1)).grid(row=0, column=2, padx=2, sticky="ew")
-        ttk.Button(edit_group, text="Clear", command=self.clear_window_positions).grid(row=0, column=3, padx=2, sticky="ew")
 
         # List fills the remaining space; gets clipped first when vertical room runs out.
         pt_list_frame = ttk.Frame(pt_frame)
