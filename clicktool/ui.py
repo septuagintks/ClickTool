@@ -1397,8 +1397,9 @@ class ClickerApp:
         for i, item in enumerate(self._screen_positions):
             if is_position_action(item):
                 dot_count += 1
-                item["dot"].index = i
-                item["dot"].set_number(dot_count)
+                if "dot" in item:
+                    item["dot"].index = i
+                    item["dot"].set_number(dot_count)
                 self.screen_tree.insert(
                     "",
                     "end",
@@ -1676,8 +1677,9 @@ class ClickerApp:
         for i, item in enumerate(self._window_positions):
             if is_position_action(item):
                 dot_count += 1
-                item["dot"].index = i
-                item["dot"].set_number(dot_count)
+                if "dot" in item:
+                    item["dot"].index = i
+                    item["dot"].set_number(dot_count)
                 title = (item['win_title'][:15] + '..') if len(item['win_title']) > 15 else item['win_title']
                 details = get_mouse_action_details(item, title)
                 self.window_pt_tree.insert("", "end", values=(dot_count, get_mouse_action_name(item), details))
