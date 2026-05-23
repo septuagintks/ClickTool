@@ -2736,11 +2736,26 @@ class ClickerApp:
         )
 
     def on_close(self) -> None:
+        from .paths import write_auto_log, get_auto_log_path
         self._stop_event.set()
         self._uninstall_kb_hook()
-        thread = self._click_thread
-        if thread and thread.is_alive():
-            thread.join(timeout=1.0)
+
+        # Join all threads with timeout and log any that fail to stop
+        threads_to_join = [
+            ("click_thread", self._click_thread),
+            ("escape_thread", self._escape_thread),
+            ("hotkey_thread", self._hotkey_thread),
+        ]
+
+        for thread_name, thread in threads_to_join:
+            if thread and thread.is_alive():
+                thread.join(timeout=1.0)
+                if thread.is_alive():
+                    write_auto_log(
+                        get_auto_log_path(),
+                        f"WARNING: {thread_name} did not stop within timeout (TID={thread.ident})"
+                    )
+
         self.root.destroy()
 
     def run(self) -> None:

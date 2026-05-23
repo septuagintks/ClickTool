@@ -86,10 +86,16 @@ def acquire_single_instance_mutex() -> int | None:
     mutex_name = f"Local\\{APP_NAME}SingleInstance"
     handle = kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
+        write_auto_log(get_auto_log_path(), f"WARN: CreateMutexW failed for {mutex_name}")
         return None
     if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        write_auto_log(
+            get_auto_log_path(),
+            f"INFO: Another instance already holds mutex {mutex_name}; handle={handle}"
+        )
         kernel32.CloseHandle(handle)
         return None
+    write_auto_log(get_auto_log_path(), f"INFO: Acquired single-instance mutex {mutex_name}; handle={handle}")
     return handle
 
 
