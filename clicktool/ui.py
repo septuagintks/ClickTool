@@ -1801,7 +1801,7 @@ class ClickerApp:
                     # doesn't act on Win+R, Win+E, Alt+Tab, etc.
                     self._safe_after(self._on_low_level_key, vk, is_up, scan, is_extended)
                     # We return 1 to swallow the event so system hotkeys like Win+D or Alt+Tab
-                    # don't trigger during capture, but this risks disrupting normal OS use 
+                    # don't trigger during capture, but this risks disrupting normal OS use
                     # if the hook isn't uninstalled properly.
                     return 1  # non-zero == handled/suppressed
             except Exception:
@@ -1818,15 +1818,37 @@ class ClickerApp:
         if not self._kb_hook_handle:
             # Hook install failed — fall back to focused-Tk-binding capture only.
             self._kb_hook_proc = None
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"WARNING: Keyboard hook installation failed (PID={os.getpid()}, TID={threading.get_ident()})")
+            self._safe_after(
+                lambda: messagebox.showwarning(
+                    "Keyboard Hook Failed",
+                    "Failed to install keyboard hook for system-wide key capture.\n\n"
+                    "Key recording will only work when ClickTool has focus.\n"
+                    "If this persists, try restarting the application."
+                )
+            )
 
     def _uninstall_kb_hook(self) -> None:
         handle = self._kb_hook_handle
         if handle:
+            unhook_success = False
             try:
-                user32.UnhookWindowsHookEx(handle)
+                result = user32.UnhookWindowsHookEx(handle)
+                unhook_success = bool(result)
+                if not unhook_success:
+                    log_path = get_auto_log_path()
+                    write_auto_log(log_path, f"WARNING: UnhookWindowsHookEx returned False (PID={os.getpid()}, TID={threading.get_ident()})")
             except Exception:
                 log_error(get_auto_log_path(), "Uninstalling keyboard hook")
-                pass
+                self._safe_after(
+                    lambda: messagebox.showerror(
+                        "Critical: Keyboard Hook Uninstall Failed",
+                        "Failed to uninstall the keyboard hook!\n\n"
+                        "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
+                        "Please restart ClickTool immediately. If the issue persists, restart your computer."
+                    )
+                )
         self._kb_hook_handle = None
         self._kb_hook_proc = None
 

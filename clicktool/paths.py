@@ -1,5 +1,6 @@
 import os
 import sys
+import msvcrt
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -42,8 +43,22 @@ def write_auto_log(log_path: str | None, message: str) -> None:
             pass
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
+        # Use file locking to prevent interleaved writes from multiple processes
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {message}\n")
+            try:
+                # Lock the file for exclusive access (Windows-specific)
+                # LOCK_EX = 1, LOCK_NB = 2 (non-blocking)
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    f.write(f"[{timestamp}] {message}\n")
+                    f.flush()
+                finally:
+                    # Unlock the file
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            except (OSError, IOError) as lock_err:
+                # If locking fails, write anyway (best effort)
+                # This can happen if another process holds the lock
+                f.write(f"[{timestamp}] {message}\n")
     except OSError as e:
         try:
             print(f"[ClickTool] log write failed for {log_path}: {e}", file=sys.stderr)
