@@ -47,13 +47,14 @@ Automation behavior:
 ### Screen Mode
 - **Global Coordinates**: Set click points anywhere on the screen
 - **Mouse Actions**: Left, right, middle, side-button clicks, and wheel scroll actions
+- **Keyboard Actions**: Record and replay keyboard input with modifier keys (Ctrl, Alt, Shift, Win). Uses scancode-based injection for layout-independent playback
 - **Draggable Targets**: Visually position numbered dots
 - **Hardware Simulation**: Uses `SendInput` for compatibility with games and sensitive apps
 
 ### Window Mode
 - **Target Windows**: Select specific windows to click within
 - **Drag & Drop Targeting**: Hold and drag the crosshair icon onto any window to target it instantly (Spy++ style)
-- **Background Client Actions**: Uses `PostMessage` and child-window detection for client-area clicks and wheel actions even when the window is not foregrounded
+- **Background Client Actions**: Uses `PostMessage` for client-area clicks, wheel actions, and keyboard input even when the window is not foregrounded
 - **Client-Only Dots**: Window dots are limited to the client area. Title bar buttons are intentionally not supported (this is the only intentional functional difference from the main branch — the minified build does not expose a Pure Background toggle because it always behaves as if it were on, to stay dependency-free)
 - **Smart Constraints**: Dots are locked within the client area and follow the window as it moves or resizes
 - **Self-Healing Windows**: If a targeted window is closed and reopened, the tool automatically re-resolves it by title match
@@ -64,8 +65,8 @@ Automation behavior:
 - **Script Management**: Export your entire setup to a JSON file and import it later
 - **Auto-run Setup**: Save the current setup for `--auto --silent`
 - **Custom Delays**: Set unique wait times for each individual click point
-- **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling; standalone Wait items insert pauses between actions
-- **Defaults & Shortcuts**: The Settings tab can change the default run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Wait, and Clear
+- **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling; keyboard actions support modifier combinations; standalone Wait items insert pauses between actions
+- **Defaults & Shortcuts**: The Settings tab can change the default run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Key, Add Wait, and Clear
 - **Global Hotkey Interception**: Start, Stop, and add/clear actions can be triggered from any window without focusing ClickTool
 - **Hotkey Scope Toggle**: Settings → Hotkey Scope → "Enable global hotkeys" turns global interception on (default) or off. Disable it before typing into apps that share the same shortcut letters to avoid conflicts
 - **DPI Awareness**: Accurate positioning on high-resolution displays
@@ -75,10 +76,11 @@ Automation behavior:
 
 1. **Choose Mode**: Use the tabs at the top to switch between **Screen Mode**, **Window Mode**, and **Settings**
 2. **Add Targets**:
-   - In **Screen Mode**, use the **Add** group to insert a Dot, Wheel, or Wait item
-   - In **Window Mode**, click "Add Window" to pick a target. Once added, use the **Add** group to insert a Dot, Wheel, or Wait item
+   - In **Screen Mode**, use the **Add** group to insert a Dot, Wheel, Key, or Wait item
+   - Click "Add Key" to record a keyboard action. Focus the input box and press your desired key combination (e.g., `Ctrl+C`, `Alt+Tab`, `Win+D`). The action is saved when all keys are released
+   - In **Window Mode**, click "Add Window" to pick a target. Once added, use the **Add** group to insert a Dot, Wheel, Key, or Wait item
 3. **Position Dots**: Drag the numbered dots to your desired locations
-4. **Configure Sequence**: Adjust the order using Up/Down buttons, choose the click button for click actions, edit wheel deltas, and set per-step custom delays
+4. **Configure Sequence**: Adjust the order using Up/Down buttons, choose the click button for click actions, edit wheel deltas, re-record key combinations, and set per-step custom delays
 5. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking
 6. **Save/Load**: Use **Export** to save your configuration and **Import** to load it later
 7. **Auto-run Setup**: Use **Auto Config** to write the startup config for `--auto --silent`
@@ -97,7 +99,7 @@ Two release formats are produced from this branch:
 
 ### `.pyz` (recommended for minified)
 
-Build a Python zipapp — single file, ~120 KB, requires Python on the target machine but no third-party deps:
+Build a Python zipapp — single file, ~400 KB, requires Python on the target machine but no third-party deps:
 
 ```bash
 python -m zipapp <stage_dir> -o ClickTool_m.pyz -p "/usr/bin/env python"
@@ -154,7 +156,7 @@ Screen Mode uses `SendInput` with `MOUSEEVENTF_VIRTUALDESK` and the virtual desk
 
 ### Log Rotation
 
-Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement with file locking) once they exceed 1 MB to prevent excessive disk usage.
+Automatic logs are stored in `%LOCALAPPDATA%\ClickTool\logs\` and are automatically rotated (using atomic replacement with file locking) once they exceed 1 MB to prevent excessive disk usage. Multi-process log writes are protected by a dedicated lock file to prevent interleaving.
 
 ### Error Reporting
 
