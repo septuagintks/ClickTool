@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, filedialog
 
 from .winapi import (
     user32, kernel32, POINT, RECT, INPUT, MOUSEINPUT, INPUT_MOUSE,
+    VK_ESCAPE,
     MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_WHEEL,
     SM_CXSCREEN, SM_CYSCREEN, WHEEL_DELTA,
     WM_MOUSEWHEEL, WM_LBUTTONDOWN, WM_LBUTTONUP,
@@ -25,7 +26,7 @@ from .script import (
     DOT_SIZE, DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS,
     DEFAULT_ENABLE_GLOBAL_HOTKEYS,
-    POSITION_ACTION_TYPES, MOUSE_BUTTONS, MOUSE_BUTTON_LABELS,
+    POSITION_ACTION_TYPES, MOUSE_BUTTONS, MOUSE_BUTTON_LABELS, KEY_MODIFIERS,
     coerce_non_negative_int, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
     normalize_script_data, read_script_file, write_script_file,
@@ -203,7 +204,8 @@ class ClickerApp:
         self._key_capture_mode: str = "screen"
         self._key_pressed_keycodes: set[int] = set()
         self._key_combo_modifiers: list[str] = []
-        self._key_combo_main: str | None = None
+        self._key_combo_main_name: str = ""
+        self._key_combo_main_vk: int = 0
         self._key_combo_main_scan: int = 0
         self._key_combo_main_extended: bool = False
         self._key_combo_mod_scans: dict[str, int] = {}
@@ -1477,8 +1479,6 @@ class ClickerApp:
         self._on_window_list_select()
         self._begin_key_capture("window")
         self.status_var.set("Press a key combination...")
-        self._begin_key_capture("window")
-        self.status_var.set("Press a key combination...")
 
     def _on_window_dot_click(self, index):
         """Select corresponding item in list when dot is clicked."""
@@ -1890,13 +1890,16 @@ class ClickerApp:
         self._install_kb_hook()
 
     def _end_key_capture(self) -> None:
-        self._capturing_key = False
         self._uninstall_kb_hook()
+        self._capturing_key = False
+        self._key_capture_index = None
+        self._reset_key_combo_state()
 
     def _reset_key_combo_state(self) -> None:
         self._key_pressed_keycodes.clear()
         self._key_combo_modifiers.clear()
-        self._key_combo_main = None
+        self._key_combo_main_name = ""
+        self._key_combo_main_vk = 0
         self._key_combo_main_scan = 0
         self._key_combo_main_extended = False
         self._key_combo_mod_scans.clear()
@@ -1907,11 +1910,11 @@ class ClickerApp:
         self._key_pressed_keycodes.add(vk)
 
         mod_name = None
-        if vk == 0x10:
+        if vk in (0x10, 0xA0, 0xA1):
             mod_name = "Shift"
-        elif vk == 0x11:
+        elif vk in (0x11, 0xA2, 0xA3):
             mod_name = "Ctrl"
-        elif vk == 0x12:
+        elif vk in (0x12, 0xA4, 0xA5):
             mod_name = "Alt"
         elif vk in (VK_LWIN, VK_RWIN):
             mod_name = "Win"
@@ -1921,25 +1924,28 @@ class ClickerApp:
                 self._key_combo_modifiers.append(mod_name)
                 self._key_combo_mod_scans[mod_name] = scan
         else:
-            if self._key_combo_main is None:
+            if not self._key_combo_main_name:
                 key_name_upper = next((k for k, v in VK_MAP.items() if v == vk), None)
                 if key_name_upper:
                     if len(key_name_upper) == 1:
-                        self._key_combo_main = key_name_upper
+                        self._key_combo_main_name = key_name_upper
                     elif key_name_upper.startswith("F") and key_name_upper[1:].isdigit():
-                        self._key_combo_main = key_name_upper
+                        self._key_combo_main_name = key_name_upper
                     else:
-                        self._key_combo_main = key_name_upper.capitalize()
+                        self._key_combo_main_name = key_name_upper.capitalize()
                 elif 0x30 <= vk <= 0x39:
-                    self._key_combo_main = chr(vk)
+                    self._key_combo_main_name = chr(vk)
                 elif 0x41 <= vk <= 0x5A:
-                    self._key_combo_main = chr(vk)
+                    self._key_combo_main_name = chr(vk)
 
-                if self._key_combo_main:
+                if self._key_combo_main_name:
+                    self._key_combo_main_vk = self._lookup_vk(self._key_combo_main_name, vk)
                     self._key_combo_main_scan = scan
                     self._key_combo_main_extended = extended
 
-        self._refresh_key_entry_text(self._key_capture_index, self._key_capture_mode)
+        preview_mods = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
+        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only - release to commit)"
+        self._set_key_entry_text(self._key_capture_mode, preview_text)
 
     def _on_key_capture_release(self, vk: int) -> None:
         if not self._capturing_key:
@@ -1947,7 +1953,7 @@ class ClickerApp:
         self._key_pressed_keycodes.discard(vk)
 
         if not self._key_pressed_keycodes:
-            if self._key_combo_main is not None:
+            if self._key_combo_main_name:
                 self._commit_key_combo()
             elif self._key_combo_modifiers:
                 # Lone modifier(s) released with no main key: promote the
@@ -1960,7 +1966,8 @@ class ClickerApp:
             return
         primary = self._key_combo_modifiers[-1]
         rest = [m for m in self._key_combo_modifiers if m != primary]
-        self._key_combo_main = primary
+        self._key_combo_main_name = primary
+        self._key_combo_main_vk = self._modifier_vk(primary)
         self._key_combo_main_scan = self._key_combo_mod_scans.get(primary, 0)
         self._key_combo_main_extended = primary == "Win"
         self._key_combo_modifiers = rest
@@ -1983,25 +1990,40 @@ class ClickerApp:
             self._end_key_capture()
             return
 
-        vk = VK_MAP.get(self._key_combo_main.upper(), 0)
-        if vk == 0 and len(self._key_combo_main) == 1:
-            vk = ord(self._key_combo_main.upper())
-
-        action["vk"] = vk
+        action["vk"] = self._key_combo_main_vk
         action["scan_code"] = self._key_combo_main_scan
         action["extended"] = self._key_combo_main_extended
-        action["key_name"] = self._key_combo_main
-        action["modifiers"] = [m for m in ("Ctrl", "Alt", "Shift", "Win") if m in self._key_combo_modifiers]
-        action["mod_scans"] = dict(self._key_combo_mod_scans)
+        action["key_name"] = self._key_combo_main_name
+        action["modifiers"] = [m for m in KEY_MODIFIERS if m in self._key_combo_modifiers]
+        action["mod_scans"] = {
+            name: self._key_combo_mod_scans[name]
+            for name in action["modifiers"]
+            if name in self._key_combo_mod_scans
+        }
 
         if mode == "screen":
             self._refresh_screen_list_item(index)
         else:
             self._refresh_window_pt_item(index)
 
-        self._refresh_key_entry_text(index, mode)
+        self._refresh_key_entry_text(mode, action)
         self._end_key_capture()
         self.status_var.set(f"Captured: {format_combo(action['modifiers'], action['key_name'])}")
+
+    @staticmethod
+    def _modifier_vk(name: str) -> int:
+        return {"Ctrl": 0x11, "Alt": 0x12, "Shift": 0x10, "Win": 0x5B}.get(name, 0)
+
+    def _lookup_vk(self, key_name: str, fallback_keycode: int) -> int:
+        if not key_name:
+            return fallback_keycode or 0
+        upper = key_name.upper()
+        vk = VK_MAP.get(upper)
+        if vk is not None:
+            return vk
+        if len(key_name) == 1:
+            return ord(upper)
+        return fallback_keycode or 0
 
     def _show_screen_button_row(self, show: bool) -> None:
         if show:
@@ -2105,6 +2127,22 @@ class ClickerApp:
             if ptype == "wait":
                 positions_snapshot.append({"type": "wait", "ms": p.get("ms", 0)})
                 continue
+            if ptype == "key":
+                snapshot = {
+                    "type": "key",
+                    "vk": p.get("vk", 0),
+                    "scan_code": p.get("scan_code", 0),
+                    "extended": bool(p.get("extended", False)),
+                    "key_name": p.get("key_name", ""),
+                    "modifiers": list(p.get("modifiers") or []),
+                    "mod_scans": dict(p.get("mod_scans") or {}),
+                    "delay": p.get("delay"),
+                }
+                if mode == "window":
+                    snapshot["hwnd"] = p.get("hwnd")
+                    snapshot["win_title"] = p.get("win_title")
+                positions_snapshot.append(snapshot)
+                continue
             snapshot = {
                 "type": ptype,
                 "x": p["x"],
@@ -2131,15 +2169,28 @@ class ClickerApp:
         
         self.start_button.config(state="disabled")
         self.stop_button.config(state="normal")
-        
+
         stop_hotkey = self.hotkey_vars["stop"].get()
+        self._escape_thread = threading.Thread(target=self._watch_escape, args=(stop_hotkey,), daemon=True)
+        self._escape_thread.start()
         if stop_hotkey:
             self.status_var.set(f"Looping clicks... Press {stop_hotkey} to stop.")
         else:
-            self.status_var.set("Looping clicks... (No stop hotkey set)")
+            self.status_var.set("Looping clicks... Press Esc to stop.")
 
     def stop_clicking(self) -> None:
         self._stop_event.set()
+
+    def _watch_escape(self, stop_hotkey: str) -> None:
+        while not self._stop_event.wait(0.03):
+            if stop_hotkey:
+                if is_hotkey_pressed_globally(stop_hotkey):
+                    self._stop_event.set()
+                    break
+            else:
+                if user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
+                    self._stop_event.set()
+                    break
 
     def _set_dots_visible(self, visible: bool):
         # Apply to both modes just in case
@@ -2159,6 +2210,8 @@ class ClickerApp:
         debounce_seconds = 0.4
         while True:
             time.sleep(0.03)
+            if self._capturing_key:
+                continue
             if not self.enable_global_hotkeys_var.get():
                 continue
             try:
