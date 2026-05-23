@@ -164,9 +164,9 @@ class ClickerApp:
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
         # Provisional minsize — the real value is computed once the layout
-        # has settled (see _compute_root_minsize). Floor stays at 680x520 so
+        # has settled (see _compute_root_minsize). Floor stays at 820x520 so
         # the first paint isn't a sliver.
-        self.root.minsize(680, 520)
+        self.root.minsize(820, 520)
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
@@ -719,7 +719,7 @@ class ClickerApp:
                 bottom += int(child.winfo_reqheight())
             min_h += tab_strip + bottom + 16
 
-            min_w = max(680, int(self.notebook.winfo_reqwidth()) + 32)
+            min_w = max(820, int(self.notebook.winfo_reqwidth()) + 32)
             self.root.minsize(min_w, min_h)
         except (tk.TclError, AttributeError):
             pass
