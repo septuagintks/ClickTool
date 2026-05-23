@@ -204,6 +204,9 @@ class ClickerApp:
         self._key_pressed_keycodes: set[int] = set()
         self._key_combo_modifiers: list[str] = []
         self._key_combo_main: str | None = None
+        self._key_combo_main_scan: int = 0
+        self._key_combo_main_extended: bool = False
+        self._key_combo_mod_scans: dict[str, int] = {}
         self._kb_hook = None
 
         self._build_ui()
@@ -1833,6 +1836,9 @@ class ClickerApp:
         self._key_pressed_keycodes.clear()
         self._key_combo_modifiers.clear()
         self._key_combo_main = None
+        self._key_combo_main_scan = 0
+        self._key_combo_main_extended = False
+        self._key_combo_mod_scans.clear()
 
     def _on_key_capture_press(self, vk: int, scan: int, extended: bool) -> None:
         if not self._capturing_key:
@@ -1852,6 +1858,7 @@ class ClickerApp:
         if mod_name:
             if mod_name not in self._key_combo_modifiers:
                 self._key_combo_modifiers.append(mod_name)
+                self._key_combo_mod_scans[mod_name] = scan
         else:
             if self._key_combo_main is None:
                 key_name_upper = next((k for k, v in VK_MAP.items() if v == vk), None)
@@ -1866,6 +1873,10 @@ class ClickerApp:
                     self._key_combo_main = chr(vk)
                 elif 0x41 <= vk <= 0x5A:
                     self._key_combo_main = chr(vk)
+
+                if self._key_combo_main:
+                    self._key_combo_main_scan = scan
+                    self._key_combo_main_extended = extended
 
         self._refresh_key_entry_text(self._key_capture_index, self._key_capture_mode)
 
@@ -1889,7 +1900,10 @@ class ClickerApp:
         primary = self._key_combo_modifiers[-1]
         rest = [m for m in self._key_combo_modifiers if m != primary]
         self._key_combo_main = primary
+        self._key_combo_main_scan = self._key_combo_mod_scans.get(primary, 0)
+        self._key_combo_main_extended = primary == "Win"
         self._key_combo_modifiers = rest
+        self._key_combo_mod_scans.pop(primary, None)
 
     def _commit_key_combo(self) -> None:
         if not self._capturing_key:
@@ -1913,8 +1927,11 @@ class ClickerApp:
             vk = ord(self._key_combo_main.upper())
 
         action["vk"] = vk
+        action["scan_code"] = self._key_combo_main_scan
+        action["extended"] = self._key_combo_main_extended
         action["key_name"] = self._key_combo_main
         action["modifiers"] = [m for m in ("Ctrl", "Alt", "Shift", "Win") if m in self._key_combo_modifiers]
+        action["mod_scans"] = dict(self._key_combo_mod_scans)
 
         if mode == "screen":
             self._refresh_screen_list_item(index)
