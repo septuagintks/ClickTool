@@ -1874,8 +1874,22 @@ class ClickerApp:
             return
         self._key_pressed_keycodes.discard(vk)
 
-        if not self._key_pressed_keycodes and self._key_combo_main is not None:
-            self._commit_key_combo()
+        if not self._key_pressed_keycodes:
+            if self._key_combo_main is not None:
+                self._commit_key_combo()
+            elif self._key_combo_modifiers:
+                # Lone modifier(s) released with no main key: promote the
+                # last modifier to be the key itself (e.g., just "Ctrl").
+                self._promote_lone_modifier()
+                self._commit_key_combo()
+
+    def _promote_lone_modifier(self) -> None:
+        if not self._key_combo_modifiers:
+            return
+        primary = self._key_combo_modifiers[-1]
+        rest = [m for m in self._key_combo_modifiers if m != primary]
+        self._key_combo_main = primary
+        self._key_combo_modifiers = rest
 
     def _commit_key_combo(self) -> None:
         if not self._capturing_key:
