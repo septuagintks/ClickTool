@@ -463,15 +463,28 @@ class ClickerApp:
         # Row 3: Selected Item Properties
         prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
         prop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        prop_frame.columnconfigure(3, weight=1)
+        prop_frame.columnconfigure(0, minsize=96)
+        prop_frame.columnconfigure(4, weight=1)
 
-        self.screen_prop_label = ttk.Label(prop_frame, text="Value:")
+        self.screen_prop_label = ttk.Label(prop_frame, text="Value:", anchor="w")
         self.screen_prop_label.grid(row=0, column=0, sticky="w")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=15)
-        self.screen_step_delay_entry.grid(row=0, column=1, padx=4)
-        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
+        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=14)
+        self.screen_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.screen_key_entry = ttk.Entry(prop_frame, width=14)
+        self.screen_key_entry.configure(state="readonly")
+        self.screen_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.screen_key_entry.grid_remove()
+        self.screen_key_entry.bind("<KeyPress>", self._on_key_capture_press)
+        self.screen_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
+        self.screen_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("screen"))
+        self.screen_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
+        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=10)
+        self.screen_custom_delay_entry.grid(row=0, column=3, sticky="w")
+        ttk.Button(prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=5, sticky="e")
 
-        ttk.Label(prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.screen_button_label = ttk.Label(prop_frame, text="Button:")
+        self.screen_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.screen_button_combo = ttk.Combobox(
             prop_frame,
             textvariable=self.mouse_button_var,
@@ -483,16 +496,12 @@ class ClickerApp:
         self.screen_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.screen_button_combo)
 
-        ttk.Label(prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
-        self.screen_custom_delay_entry = ttk.Entry(prop_frame, textvariable=self.custom_delay_var, width=12)
-        self.screen_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
-
         ttk.Label(
             prop_frame,
             text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=4, sticky="w")
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
         # Row 4: Controls — Add row, Edit row below
         action_bar = ttk.Frame(frame)
@@ -628,18 +637,31 @@ class ClickerApp:
         ttk.Button(edit_group, text="Down", command=lambda: self.move_window_position(1)).grid(row=0, column=2, padx=2, sticky="ew")
         ttk.Button(edit_group, text="Clear", command=self.clear_window_positions).grid(row=0, column=3, padx=2, sticky="ew")
 
-        # Selected Item Properties for Window Mode
+        # Selected Item Properties (packed bottom first so it survives shrinking).
         win_prop_frame = ttk.LabelFrame(pt_frame, text="Selected Item Properties", padding=8)
-        win_prop_frame.pack(fill="x", pady=(8, 0))
-        win_prop_frame.columnconfigure(3, weight=1)
+        win_prop_frame.pack(side="bottom", fill="x", pady=(8, 0))
+        win_prop_frame.columnconfigure(0, minsize=96)
+        win_prop_frame.columnconfigure(4, weight=1)
 
-        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:")
+        self.window_prop_label = ttk.Label(win_prop_frame, text="Value:", anchor="w")
         self.window_prop_label.grid(row=0, column=0, sticky="w")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=15)
-        self.window_step_delay_entry.grid(row=0, column=1, padx=4)
-        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay).grid(row=0, column=2)
+        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=14)
+        self.window_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.window_key_entry = ttk.Entry(win_prop_frame, width=14)
+        self.window_key_entry.configure(state="readonly")
+        self.window_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="w")
+        self.window_key_entry.grid_remove()
+        self.window_key_entry.bind("<KeyPress>", self._on_key_capture_press)
+        self.window_key_entry.bind("<KeyRelease>", self._on_key_capture_release)
+        self.window_key_entry.bind("<FocusIn>", lambda e: self._begin_key_capture("window"))
+        self.window_key_entry.bind("<FocusOut>", lambda e: self._end_key_capture())
+        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=10)
+        self.window_custom_delay_entry.grid(row=0, column=3, sticky="w")
+        ttk.Button(win_prop_frame, text="Apply", command=self.apply_step_delay, width=8).grid(row=0, column=5, sticky="e")
 
-        ttk.Label(win_prop_frame, text="Button:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.window_button_label = ttk.Label(win_prop_frame, text="Button:")
+        self.window_button_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.window_button_combo = ttk.Combobox(
             win_prop_frame,
             textvariable=self.mouse_button_var,
@@ -651,16 +673,12 @@ class ClickerApp:
         self.window_button_combo.bind("<<ComboboxSelected>>", self._on_mouse_button_selected)
         self._button_controls.append(self.window_button_combo)
 
-        ttk.Label(win_prop_frame, text="Custom Delay (ms):").grid(row=1, column=2, sticky="w", pady=(6, 0), padx=(10, 0))
-        self.window_custom_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.custom_delay_var, width=12)
-        self.window_custom_delay_entry.grid(row=1, column=3, sticky="w", pady=(6, 0))
-
         ttk.Label(
             win_prop_frame,
             text="Click: x,y; Wheel: x,y,delta; Wait: ms; Key: focus the box and press the combo",
             font=("", 8),
             foreground="#666666",
-        ).grid(row=2, column=0, columnspan=4, sticky="w")
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
     def _on_tab_changed(self, event):
         """Show only the dots belonging to the active tab."""
