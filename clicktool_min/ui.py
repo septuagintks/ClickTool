@@ -6,7 +6,7 @@ from tkinter import ttk, messagebox, filedialog
 
 from .winapi import (
     user32, kernel32, POINT, RECT, INPUT, MOUSEINPUT, INPUT_MOUSE,
-    VK_ESCAPE,
+    VK_ESCAPE, VK_LWIN, VK_RWIN,
     MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_WHEEL,
     SM_CXSCREEN, SM_CYSCREEN, WHEEL_DELTA,
     WM_MOUSEWHEEL, WM_LBUTTONDOWN, WM_LBUTTONUP,
@@ -280,6 +280,13 @@ class ClickerApp:
             background=[("selected", bg_card), ("active", "#deecf9")],
             lightcolor=[("selected", bg_card)],
             bordercolor=[("selected", border_color)]
+        )
+
+        style.configure("Treeview", background=bg_card, fieldbackground=bg_card, rowheight=24, bordercolor=border_color, borderwidth=1)
+        style.configure("Treeview.Heading", background="#e1dfdd", foreground=fg_text, font=("Segoe UI", 9, "bold"), padding=4)
+        style.map("Treeview",
+            background=[("selected", primary_light)],
+            foreground=[("selected", fg_text)]
         )
 
     def _build_ui(self) -> None:
