@@ -2555,8 +2555,7 @@ class ClickerApp:
     def _watch_global_hotkeys(self) -> None:
         last_fired: dict[str, float] = {}
         debounce_seconds = HOTKEY_DEBOUNCE_SECONDS
-        while True:
-            time.sleep(HOTKEY_POLL_INTERVAL_SECONDS)
+        while not self._stop_event.wait(HOTKEY_POLL_INTERVAL_SECONDS):
             if self._capturing_key:
                 continue
             if not self.enable_global_hotkeys_var.get():
