@@ -444,15 +444,15 @@ class ClickerApp:
 
     def _build_screen_mode_ui(self, frame) -> None:
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(2, weight=1)
+        frame.rowconfigure(1, weight=1)
         # Row 1: Position List Label
         ttk.Label(frame, text="Click Order & Positions").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(0, 4)
+            row=0, column=0, sticky="w", pady=(0, 4)
         )
 
         # Row 2: Treeview for Actions
         list_frame = ttk.Frame(frame)
-        list_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        list_frame.grid(row=1, column=0, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 
@@ -474,7 +474,7 @@ class ClickerApp:
 
         # Row 3: Selected Item Properties
         prop_frame = ttk.LabelFrame(frame, text="Selected Item Properties", padding=8)
-        prop_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        prop_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         prop_frame.columnconfigure(0, minsize=96)
         prop_frame.columnconfigure(1, weight=1)
         prop_frame.columnconfigure(3, weight=1)
@@ -518,7 +518,7 @@ class ClickerApp:
 
         # Row 4: Controls — Add row, Edit row below
         action_bar = ttk.Frame(frame)
-        action_bar.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        action_bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         action_bar.columnconfigure(0, weight=1)
 
         add_group = ttk.LabelFrame(action_bar, text="Add", padding=(6, 4))
@@ -763,21 +763,7 @@ class ClickerApp:
             self.root.minsize(min_w, min_h)
         except (tk.TclError, AttributeError):
             pass
-        paned = getattr(self, "_win_paned", None)
-        if paned is None:
-            return
-        try:
-            total = paned.winfo_width()
-            if total <= 1:
-                return
-            current = paned.sashpos(0)
-            min_left = self._win_pane_min_left
-            max_left = max(min_left, total - self._win_pane_min_right)
-            clamped = max(min_left, min(current, max_left))
-            if clamped != current:
-                paned.sashpos(0, clamped)
-        except (tk.TclError, AttributeError):
-            pass
+        self._clamp_paned_sash()
 
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
