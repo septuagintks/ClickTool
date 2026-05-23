@@ -2,6 +2,8 @@
 
 A flexible Windows mouse auto-clicker with visual draggable targets. Supports both screen-wide and window-specific clicking modes.
 
+> **Tip**: Looking for something even lighter? Check out our [Minified Branch](https://github.com/septuagintks/ClickTool/blob/minified/README.md)—a zero-dependency version that runs anywhere with Python.
+
 ## Quick Start
 
 1. **Download**: Grab `ClickTool.exe` from the latest release.
