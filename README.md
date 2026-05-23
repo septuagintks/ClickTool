@@ -63,11 +63,12 @@ Automation behavior:
 ### 1. Screen Mode
 - **Global Coordinates**: Set mouse action points anywhere on the screen.
 - **Mouse Actions**: Supports left, right, middle, side-button clicks, and wheel scroll actions.
+- **Keyboard Actions**: Record and replay keyboard input with modifier keys (Ctrl, Alt, Shift, Win). Uses scancode-based injection for layout-independent playback.
 - **Draggable Targets**: Visually position numbered dots.
 
 ### 2. Window Mode
 - **Target Windows**: Select specific windows to click within.
-- **Background Client Actions**: Uses `PostMessage` and child-window detection for client-area clicks and wheel actions even when the window is not foregrounded.
+- **Background Client Actions**: Uses `PostMessage` for client-area clicks, wheel actions, and keyboard input even when the window is not foregrounded.
 - **Title Bar Support**: When pure background mode is off, non-client clicks such as title-bar buttons fall back to real mouse input for better compatibility.
 - **Pure Background Mode**: The Settings tab can enable pure background window clicking. In this mode, window dots are limited to the client area and title-bar clicks are not supported.
 - **Smart Constraints**: Dots are locked within the active window-mode range and follow the window as it moves or resizes.
@@ -85,8 +86,8 @@ Automation behavior:
 - **Auto Startup Config**: Import a script or save the current setup as the Task Scheduler auto-run config, including loop timeout and max-round limits.
 - **Auto-refreshing Window List**: The "Add Window" dialog automatically updates the list of available windows.
 - **Custom Delays**: Set unique wait times for each individual click point.
-- **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling.
-- **Defaults & Shortcuts**: The Settings tab can change the run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Wait, and Clear.
+- **Action Editing**: Click actions can choose `left`, `right`, `middle`, `x1`, or `x2`; wheel actions use positive deltas for upward scrolling and negative deltas for downward scrolling; keyboard actions support modifier combinations (Ctrl, Alt, Shift, Win).
+- **Defaults & Shortcuts**: The Settings tab can change the run interval, default wait-item duration, and app shortcuts for Start, Stop, Add Window, Add Dot, Add Wheel, Add Key, Add Wait, and Clear.
 - **Global Hotkey Scope Toggle**: Settings → Hotkey Scope → "Enable global hotkeys" controls whether shortcuts trigger system-wide (default) or only when ClickTool has focus. Disable it to avoid conflicts while typing in other apps.
 - **DPI Awareness**: Accurate positioning on high-resolution displays.
 - **Emergency Stop**: Press **Esc** at any time to stop the clicking loop.
@@ -99,9 +100,10 @@ Automation behavior:
 4. **Add Targets**:
    - In **Screen Mode**, click "Add Dot".
    - Click "Add Wheel" to create a scroll action at a draggable point.
-   - In **Window Mode**, click "Add Window" to pick a target (the list refreshes automatically). Once added, the window is automatically selected so you can immediately click "Add Dot" or "Add Wheel".
+   - Click "Add Key" to record a keyboard action. Focus the input box and press your desired key combination (e.g., `Ctrl+C`, `Alt+Tab`, `Win+D`). The action is saved when all keys are released.
+   - In **Window Mode**, click "Add Window" to pick a target (the list refreshes automatically). Once added, the window is automatically selected so you can immediately click "Add Dot", "Add Wheel", or "Add Key".
 5. **Position Dots**: Drag the numbered dots to your desired locations.
-6. **Configure Sequence**: Adjust the order using Up/Down buttons, choose the click button for click actions, edit wheel deltas, and set waits.
+6. **Configure Sequence**: Adjust the order using Up/Down buttons, choose the click button for click actions, edit wheel deltas, re-record key combinations, and set waits.
 7. **Set Execution**: Toggle the **Loop** checkbox to enable or disable continuous clicking.
 8. **Save/Load**: Use **Export** to save your configuration and **Import** to load a previously saved setup.
 9. **Auto-run Setup**: Use **Auto Config** to import a script or save the current setup for `--auto --silent`. For looped auto configs, set the timeout and max-round safety limits.
