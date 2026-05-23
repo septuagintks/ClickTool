@@ -1250,6 +1250,8 @@ class ClickerApp:
         self._refresh_screen_list_item(index)
 
     def _clamp_paned_sash(self, event=None) -> None:
+        """Prevent the Window Mode sash from being dragged so far that either
+        pane becomes unusable."""
         paned = getattr(self, "_win_paned", None)
         if paned is None:
             return
@@ -1289,21 +1291,7 @@ class ClickerApp:
             self.root.minsize(min_w, min_h)
         except (tk.TclError, AttributeError):
             pass
-        paned = getattr(self, "_win_paned", None)
-        if paned is None:
-            return
-        try:
-            total = paned.winfo_width()
-            if total <= 1:
-                return
-            current = paned.sashpos(0)
-            min_left = self._win_pane_min_left
-            max_left = max(min_left, total - self._win_pane_min_right)
-            clamped = max(min_left, min(current, max_left))
-            if clamped != current:
-                paned.sashpos(0, clamped)
-        except (tk.TclError, AttributeError):
-            pass
+        self._clamp_paned_sash()
 
     def _show_screen_button_row(self, show: bool) -> None:
         if show:
