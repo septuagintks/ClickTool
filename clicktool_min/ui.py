@@ -158,6 +158,9 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
+        # Provisional minsize — the real value is computed once the layout
+        # has settled (see _compute_root_minsize). Floor stays at 680x520 so
+        # the first paint isn't a sliver.
         self.root.minsize(680, 520)
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
@@ -252,29 +255,12 @@ class ClickerApp:
 
     def _build_ui(self) -> None:
         self._apply_ui_theme()
-        # Notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True)
-        
-        # Screen Mode Tab
-        self.screen_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.screen_frame, text="Screen Mode")
-        self._build_screen_mode_ui(self.screen_frame)
 
-        # Window Mode Tab
-        self.window_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.window_frame, text="Window Mode")
-        self._build_window_mode_ui(self.window_frame)
-
-        self.settings_frame = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.settings_frame, text="Settings")
-        self._build_settings_ui(self.settings_frame)
-
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-
-        # Global Run controls and Status
+        # Global Run controls and Status — packed FIRST at the bottom so
+        # they survive when the user shrinks the window. The notebook above
+        # is the only widget that gets clipped.
         bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
-        bottom_frame.pack(fill="x")
+        bottom_frame.pack(side="bottom", fill="x")
         bottom_frame.columnconfigure(1, weight=1)
 
         run_frame = ttk.Frame(bottom_frame)
@@ -297,9 +283,60 @@ class ClickerApp:
             row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
         )
 
+        # Notebook for tabs (packed AFTER bottom_frame so it lives above and
+        # is the first widget the geometry manager clips when shrinking).
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(side="top", fill="both", expand=True)
+
+        # Screen Mode Tab
+        self.screen_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.screen_frame, text="Screen Mode")
+        self._build_screen_mode_ui(self.screen_frame)
+
+        # Window Mode Tab
+        self.window_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.window_frame, text="Window Mode")
+        self._build_window_mode_ui(self.window_frame)
+
+        self.settings_frame = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.settings_frame, text="Settings")
+        self._build_settings_ui(self.settings_frame)
+
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
     def _build_settings_ui(self, frame) -> None:
         frame.columnconfigure(0, weight=1)
-        info = ttk.LabelFrame(frame, text="Window Mode", padding=10)
+        frame.rowconfigure(0, weight=1)
+
+        # Wrap everything in a scrollable canvas so content never clips.
+        canvas = tk.Canvas(frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Make scrollable_frame expand to fill canvas width
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Bind mousewheel to canvas for smooth scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        scrollable_frame.columnconfigure(0, weight=1)
+
+        info = ttk.LabelFrame(scrollable_frame, text="Window Mode", padding=10)
         info.grid(row=0, column=0, sticky="ew")
         ttk.Label(info, text="Window Mode is client-area only in the minified build.").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -309,7 +346,7 @@ class ClickerApp:
             wraplength=500,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-        hotkey_scope_frame = ttk.LabelFrame(frame, text="Hotkey Scope", padding=10)
+        hotkey_scope_frame = ttk.LabelFrame(scrollable_frame, text="Hotkey Scope", padding=10)
         hotkey_scope_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         ttk.Checkbutton(
             hotkey_scope_frame,
@@ -323,7 +360,7 @@ class ClickerApp:
             wraplength=500,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-        defaults_frame = ttk.LabelFrame(frame, text="Defaults", padding=10)
+        defaults_frame = ttk.LabelFrame(scrollable_frame, text="Defaults", padding=10)
         defaults_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         defaults_frame.columnconfigure(1, weight=1)
         ttk.Label(defaults_frame, text="Interval (ms)").grid(row=0, column=0, sticky="w")
@@ -332,7 +369,7 @@ class ClickerApp:
         ttk.Entry(defaults_frame, textvariable=self.default_wait_var, width=10).grid(row=0, column=3, sticky="w", padx=(8, 0))
         ttk.Button(defaults_frame, text="Apply", command=self.apply_defaults).grid(row=0, column=4, sticky="e", padx=(16, 0))
 
-        hotkey_frame = ttk.LabelFrame(frame, text="Shortcuts", padding=10)
+        hotkey_frame = ttk.LabelFrame(scrollable_frame, text="Shortcuts", padding=10)
         hotkey_frame.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         for col in (1, 3):
             hotkey_frame.columnconfigure(col, weight=1)
@@ -462,16 +499,27 @@ class ClickerApp:
         paned.grid(row=0, column=0, sticky="nsew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        
+
+        self._win_paned = paned
+        self._win_pane_min_left = 180
+        self._win_pane_min_right = 380
+        paned.bind("<B1-Motion>", self._clamp_paned_sash)
+        paned.bind("<ButtonRelease-1>", self._clamp_paned_sash)
+        paned.bind("<Configure>", self._clamp_paned_sash)
+
         # Left: Window Column
         win_frame = ttk.Frame(paned, padding=(0, 0, 8, 0))
         paned.add(win_frame, weight=1)
-        
+        try:
+            paned.paneconfigure(win_frame, minsize=self._win_pane_min_left)
+        except tk.TclError:
+            pass
+
         ttk.Label(win_frame, text="Target Windows").pack(anchor="w")
-        
+
         win_list_frame = ttk.Frame(win_frame)
         win_list_frame.pack(fill="both", expand=True, pady=4)
-        
+
         self.target_win_list = tk.Listbox(
             win_list_frame,
             height=12,
@@ -488,19 +536,23 @@ class ClickerApp:
             highlightcolor="#0078d7"
         )
         self.target_win_list.pack(side="left", fill="both", expand=True)
-        
+
         win_scroll = ttk.Scrollbar(win_list_frame, orient="vertical", command=self.target_win_list.yview)
         win_scroll.pack(side="right", fill="y")
         self.target_win_list.config(yscrollcommand=win_scroll.set)
-        
+
         win_btn_row = ttk.Frame(win_frame)
         win_btn_row.pack(fill="x")
         ttk.Button(win_btn_row, text="Add Window", command=self.add_target_window).pack(side="left", padx=2)
         ttk.Button(win_btn_row, text="Remove", command=self.remove_target_window).pack(side="left", padx=2)
-        
+
         # Right: Click Point Column
         pt_frame = ttk.Frame(paned, padding=(8, 0, 0, 0))
         paned.add(pt_frame, weight=2)
+        try:
+            paned.paneconfigure(pt_frame, minsize=self._win_pane_min_right)
+        except tk.TclError:
+            pass
         
         ttk.Label(pt_frame, text="Click Points (Cross-window sorting allowed)").pack(anchor="w")
         
@@ -609,7 +661,65 @@ class ClickerApp:
                     if is_position_action(p) and "dot" in p: p["dot"].withdraw()
                 for p in self._window_positions:
                     if is_position_action(p) and "dot" in p: p["dot"].deiconify()
-            
+
+    def _clamp_paned_sash(self, event=None) -> None:
+        """Prevent the Window Mode sash from being dragged so far that either
+        pane becomes unusable."""
+        paned = getattr(self, "_win_paned", None)
+        if paned is None:
+            return
+        try:
+            total = paned.winfo_width()
+            if total <= 1:
+                return
+            current = paned.sashpos(0)
+            min_left = self._win_pane_min_left
+            max_left = max(min_left, total - self._win_pane_min_right)
+            clamped = max(min_left, min(current, max_left))
+            if clamped != current:
+                paned.sashpos(0, clamped)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _compute_root_minsize(self) -> None:
+        """Lock the root window's minimum size to the smallest layout that
+        still fits every tab."""
+        try:
+            self.root.update_idletasks()
+
+            min_h = 0
+            for tab_id in self.notebook.tabs():
+                tab_widget = self.notebook.nametowidget(tab_id)
+                min_h = max(min_h, int(tab_widget.winfo_reqheight()))
+            # Notebook tab strip + bottom bar + a little chrome.
+            tab_strip = 32
+            bottom = 0
+            for child in self.root.winfo_children():
+                if child is self.notebook:
+                    continue
+                bottom += int(child.winfo_reqheight())
+            min_h += tab_strip + bottom + 16
+
+            min_w = max(680, int(self.notebook.winfo_reqwidth()) + 32)
+            self.root.minsize(min_w, min_h)
+        except (tk.TclError, AttributeError):
+            pass
+        paned = getattr(self, "_win_paned", None)
+        if paned is None:
+            return
+        try:
+            total = paned.winfo_width()
+            if total <= 1:
+                return
+            current = paned.sashpos(0)
+            min_left = self._win_pane_min_left
+            max_left = max(min_left, total - self._win_pane_min_right)
+            clamped = max(min_left, min(current, max_left))
+            if clamped != current:
+                paned.sashpos(0, clamped)
+        except (tk.TclError, AttributeError):
+            pass
+
     def sync_dots_loop(self):
         """Update window-based dots to follow their windows and prevent overflow."""
         # Only sync if we are not clicking
