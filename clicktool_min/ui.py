@@ -373,7 +373,15 @@ class ClickerApp:
         # Bind mousewheel to canvas for smooth scrolling
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            return "break" # Prevent event propagation
+
+        def _on_enter(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _on_leave(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _on_enter)
+        canvas.bind("<Leave>", _on_leave)
 
         scrollable_frame.columnconfigure(0, weight=1)
 
