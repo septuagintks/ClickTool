@@ -221,6 +221,7 @@ class ClickerApp:
         self._key_combo_main_extended: bool = False
         self._key_combo_mod_scans: dict[str, int] = {}
         self._kb_hook = None
+        self._kb_capture_watchdog: str | None = None
 
         self._build_ui()
         self._apply_hotkeys(show_status=False)
@@ -1906,8 +1907,37 @@ class ClickerApp:
             entry.insert(0, "press combo (SYSTEM HOTKEYS SUPPRESSED), then release all")
             entry.configure(state="readonly")
         self._install_kb_hook()
+        self._arm_capture_watchdog()
+
+    def _arm_capture_watchdog(self) -> None:
+        # Auto-cancel capture so system hotkeys are not suppressed indefinitely.
+        if self._kb_capture_watchdog is not None:
+            try:
+                self.root.after_cancel(self._kb_capture_watchdog)
+            except (RuntimeError, tk.TclError):
+                pass
+        try:
+            self._kb_capture_watchdog = self.root.after(15000, self._on_capture_watchdog_fired)
+        except (RuntimeError, tk.TclError):
+            self._kb_capture_watchdog = None
+
+    def _on_capture_watchdog_fired(self) -> None:
+        self._kb_capture_watchdog = None
+        if not self._capturing_key:
+            return
+        write_auto_log(
+            get_auto_log_path(),
+            "WARNING: key-capture watchdog fired after 15s; force-uninstalling hook",
+        )
+        self._end_key_capture()
 
     def _end_key_capture(self) -> None:
+        if self._kb_capture_watchdog is not None:
+            try:
+                self.root.after_cancel(self._kb_capture_watchdog)
+            except (RuntimeError, tk.TclError):
+                pass
+            self._kb_capture_watchdog = None
         self._uninstall_kb_hook()
         self._capturing_key = False
         self._key_capture_index = None

@@ -83,7 +83,7 @@ def log_error(log_path: str | None, context: str) -> None:
 
 
 def acquire_single_instance_mutex() -> int | None:
-    mutex_name = f"Local\\{APP_NAME}SingleInstance"
+    mutex_name = f"Local\\{APP_NAME}MinSingleInstance"
     handle = kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
         write_auto_log(get_auto_log_path(), f"WARN: CreateMutexW failed for {mutex_name}")
