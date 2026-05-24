@@ -175,7 +175,7 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
-        # Provisional minsize — the real value is computed once the layout
+        # Provisional minsize - the real value is computed once the layout
         # has settled (see _compute_root_minsize). Floor keeps first paint usable.
         # the first paint isn't a sliver.
         self.root.minsize(ROOT_MIN_WIDTH, ROOT_MIN_HEIGHT)
@@ -298,7 +298,7 @@ class ClickerApp:
     def _build_ui(self) -> None:
         self._apply_ui_theme()
 
-        # Global Run controls and Status — packed FIRST at the bottom so
+        # Global Run controls and Status - packed FIRST at the bottom so
         # they survive when the user shrinks the window. The notebook above
         # is the only widget that gets clipped.
         bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
@@ -529,7 +529,7 @@ class ClickerApp:
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        # Row 4: Controls — Add row, Edit row below
+        # Row 4: Controls - Add row, Edit row below
         action_bar = ttk.Frame(frame)
         action_bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         action_bar.columnconfigure(0, weight=1)
@@ -2596,16 +2596,14 @@ class ClickerApp:
         all_active_windows = list_visible_windows()
 
         missing_windows = []
+        fuzzy_matched = []
         for win_title in data.get("target_windows", []):
-            found_hwnd = next((h for h, t in all_active_windows if t == win_title), None)
-            if not found_hwnd:
-                # Substring fallback
-                match = next(((h, t) for h, t in all_active_windows if win_title.lower() in t.lower()), None)
-                if match:
-                    found_hwnd, real_title = match
-                    print(f"INFO: Matched '{win_title}' to '{real_title}'")
-            
+            found_hwnd = resolve_hwnd_by_title(win_title, all_active_windows)
             if found_hwnd:
+                exact_match = any(t == win_title for h, t in all_active_windows if h == found_hwnd)
+                if not exact_match:
+                    real_title = next(t for h, t in all_active_windows if h == found_hwnd)
+                    fuzzy_matched.append((win_title, real_title))
                 self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
             else:
                 missing_windows.append(win_title)
@@ -2616,11 +2614,20 @@ class ClickerApp:
         for p_data in data.get("window_positions", []):
             self._restore_window_position(p_data)
         self._refresh_window_pt_list()
-        
+
+        if fuzzy_matched:
+            lines = [f"  '{saved}' → '{actual}'" for saved, actual in fuzzy_matched]
+            messagebox.showinfo(
+                "Window Title Fuzzy Match",
+                "The following saved window titles were matched by substring:\n\n" +
+                "\n".join(lines) +
+                "\n\nIf the match is incorrect, close and reopen the target window with the exact title."
+            )
+
         if missing_windows:
             messagebox.showwarning(
                 "Missing Windows",
-                "The following windows could not be found and their points may not work correctly:\n\n" + 
+                "The following windows could not be found and their points may not work correctly:\n\n" +
                 "\n".join(missing_windows)
             )
         

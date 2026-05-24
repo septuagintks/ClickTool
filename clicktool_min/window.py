@@ -254,7 +254,7 @@ def _resolve_key_vk(action: dict) -> int:
 
 
 def _scan_for_vk(vk: int, action_scan: int = 0) -> tuple[int, bool]:
-    """Return (scan_code, is_extended) — prefer the captured scan, fall back to the layout map."""
+    """Return (scan_code, is_extended) - prefer the captured scan, fall back to the layout map."""
     if action_scan:
         return action_scan & 0xFF, vk in EXTENDED_VK
     sc = user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)
