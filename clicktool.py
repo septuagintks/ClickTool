@@ -47,7 +47,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
         max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
 
-        write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
+    write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
 
     fallback_actions = data.get("window_positions", []) if mode == "window" else data.get("screen_positions", [])
     raw_actions = data.get("actions") or fallback_actions

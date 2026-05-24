@@ -200,6 +200,7 @@ class ClickerApp:
         self._target_windows: list[dict] = [] # {"hwnd": int, "title": str}
         
         self._stop_event = threading.Event()
+        self._app_stop_event = threading.Event()
         self._click_thread: threading.Thread | None = None
         self._escape_thread: threading.Thread | None = None
 
@@ -2567,7 +2568,7 @@ class ClickerApp:
     def _watch_global_hotkeys(self) -> None:
         last_fired: dict[str, float] = {}
         debounce_seconds = HOTKEY_DEBOUNCE_SECONDS
-        while not self._stop_event.wait(HOTKEY_POLL_INTERVAL_SECONDS):
+        while not self._app_stop_event.wait(HOTKEY_POLL_INTERVAL_SECONDS):
             if self._capturing_key:
                 continue
             if not self.enable_global_hotkeys_var.get():
@@ -2717,6 +2718,7 @@ class ClickerApp:
         from .paths import write_auto_log, get_auto_log_path
         self._uninstall_kb_hook()
         self._stop_event.set()
+        self._app_stop_event.set()
 
         # Join all threads with timeout and log any that fail to stop
         threads_to_join = [
