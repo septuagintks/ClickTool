@@ -40,6 +40,8 @@ def write_auto_log(log_path: str | None, message: str) -> None:
     try:
         # Create lock file and acquire exclusive lock
         # This ensures all operations (rotation check, write) are atomic across processes
+        # Note: the lock file is never deleted (to avoid cross-process race conditions),
+        # but it only occupies a few bytes and does not affect functionality.
         os.makedirs(log_dir, exist_ok=True)
         with open(lock_path, "a", encoding="utf-8") as lock_file:
             try:

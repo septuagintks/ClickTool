@@ -2300,6 +2300,7 @@ class ClickerApp:
 
         active_windows = list_visible_windows()
         missing_windows = []
+        fuzzy_matched = []
         for win_title in data.get("target_windows", []):
             found_hwnd = next((h for h, t in active_windows if t == win_title), None)
             if not found_hwnd:
@@ -2307,8 +2308,8 @@ class ClickerApp:
                 match = next(((h, t) for h, t in active_windows if win_title.lower() in t.lower()), None)
                 if match:
                     found_hwnd, real_title = match
-                    print(f"INFO: Matched '{win_title}' to '{real_title}'")
-            
+                    fuzzy_matched.append((win_title, real_title))
+
             if found_hwnd:
                 self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
             else:
@@ -2369,6 +2370,15 @@ class ClickerApp:
                 })
         self._refresh_window_pt_list()
         self._on_tab_changed(None)
+
+        if fuzzy_matched and show_warnings:
+            lines = [f"  '{saved}' → '{actual}'" for saved, actual in fuzzy_matched]
+            messagebox.showinfo(
+                "Window Title Fuzzy Match",
+                "The following saved window titles were matched by substring:\n\n" +
+                "\n".join(lines) +
+                "\n\nIf the match is incorrect, close and reopen the target window with the exact title."
+            )
 
         if missing_windows and show_warnings:
             messagebox.showwarning(
@@ -2537,11 +2547,13 @@ class ClickerApp:
             return
 
         self._stop_event.clear()
-        
-        # Snapshot actions for the thread
+
+        # Snapshot actions for the thread (deep copy to avoid shared mutable state)
+        import copy
         actions_snapshot = []
         for p in positions:
-            snapshot = {k: v for k, v in p.items() if k != "dot"}
+            snapshot = {k: copy.deepcopy(v) if k != "dot" else None for k, v in p.items()}
+            snapshot = {k: v for k, v in snapshot.items() if k != "dot"}
             actions_snapshot.append(snapshot)
             
         # Hide dots while clicking to avoid blocking
