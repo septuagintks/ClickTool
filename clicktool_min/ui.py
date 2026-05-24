@@ -223,6 +223,7 @@ class ClickerApp:
         self._key_combo_mod_scans: dict[str, int] = {}
         self._kb_hook = None
         self._kb_capture_watchdog: str | None = None
+        self._sync_dots_after_id: str | None = None
 
         self._build_ui()
         self._apply_hotkeys(show_status=False)
@@ -818,10 +819,14 @@ class ClickerApp:
                             p["dot"].withdraw()
                 else:
                     p["dot"].withdraw()
+        
+        if not self._app_stop_event.is_set():
+            try:
+                self._sync_dots_after_id = self.root.after(200, self.sync_dots_loop)
+            except (tk.TclError, RuntimeError):
+                self._sync_dots_after_id = None
 
-        self.root.after(200, self.sync_dots_loop)
-
-    def add_target_window(self):
+    def _on_target_win_add(self):
         """Open a dialog to select a window from all visible windows."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Select Window (Auto-refreshing)")
@@ -2764,6 +2769,14 @@ class ClickerApp:
         from .paths import write_auto_log, get_auto_log_path
         self._stop_event.set()
         self._app_stop_event.set()
+        
+        if self._sync_dots_after_id:
+            try:
+                self.root.after_cancel(self._sync_dots_after_id)
+            except (tk.TclError, RuntimeError, ValueError):
+                pass
+            self._sync_dots_after_id = None
+
         self._uninstall_kb_hook()
 
         # Join all threads with timeout and log any that fail to stop
