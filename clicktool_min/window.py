@@ -213,11 +213,15 @@ def perform_window_mouse_action(hwnd: int, action: dict) -> bool:
     normalize_mouse_action(action)
     sx = int(rect[0] + x)
     sy = int(rect[1] + y)
-    cl_tl = POINT(0, 0)
-    user32.ClientToScreen(hwnd, ctypes.byref(cl_tl))
-    cx = int(sx - cl_tl.x)
-    cy = int(sy - cl_tl.y)
-    target_hwnd = user32.ChildWindowFromPointEx(hwnd, POINT(cx, cy), CWP_SKIPINVISIBLE) or hwnd
+
+    target_hwnd = hwnd
+    for _ in range(32):
+        pt = POINT(sx, sy)
+        user32.ScreenToClient(target_hwnd, ctypes.byref(pt))
+        child = user32.ChildWindowFromPointEx(target_hwnd, pt, CWP_SKIPINVISIBLE)
+        if not child or child == target_hwnd:
+            break
+        target_hwnd = child
 
     t_cl_tl = POINT(0, 0)
     user32.ClientToScreen(target_hwnd, ctypes.byref(t_cl_tl))
