@@ -168,7 +168,7 @@ class ClickerApp:
         self.root = tk.Tk()
         self.root.title("Mouse Click Tool")
         self.root.resizable(True, True)
-        # Provisional minsize — the real value is computed once the layout
+        # Provisional minsize - the real value is computed once the layout
         # has settled (see _compute_root_minsize). Floor keeps first paint usable.
         # the first paint isn't a sliver.
         self.root.minsize(ROOT_MIN_WIDTH, ROOT_MIN_HEIGHT)
@@ -292,7 +292,7 @@ class ClickerApp:
     def _build_ui(self) -> None:
         self._apply_ui_theme()
 
-        # Global Run controls and Status — packed FIRST at the bottom so
+        # Global Run controls and Status - packed FIRST at the bottom so
         # they survive when the user shrinks the window. The notebook above
         # is the only widget that gets clipped.
         bottom_frame = ttk.Frame(self.root, padding=(8, 0, 8, 8))
@@ -528,7 +528,7 @@ class ClickerApp:
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        # Row 4: Controls — Add row, Edit row below
+        # Row 4: Controls - Add row, Edit row below
         action_bar = ttk.Frame(frame)
         action_bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         action_bar.columnconfigure(0, weight=1)
@@ -1840,14 +1840,14 @@ class ClickerApp:
                 log_error(get_auto_log_path(), "Processing low-level keyboard hook")
             return user32.CallNextHookEx(self._kb_hook_handle, nCode, wParam, lParam)
 
-        # Keep the callable alive — losing the reference invalidates the hook.
+        # Keep the callable alive - losing the reference invalidates the hook.
         self._kb_hook_proc = LowLevelKeyboardProc(_proc)
         h_module = kernel32.GetModuleHandleW(None)
         self._kb_hook_handle = user32.SetWindowsHookExW(
             WH_KEYBOARD_LL, self._kb_hook_proc, h_module, 0
         )
         if not self._kb_hook_handle:
-            # Hook install failed — fall back to focused-Tk-binding capture only.
+            # Hook install failed - fall back to focused-Tk-binding capture only.
             self._kb_hook_proc = None
             log_path = get_auto_log_path()
             write_auto_log(log_path, f"WARNING: Keyboard hook installation failed (PID={os.getpid()}, TID={threading.get_ident()})")
@@ -1972,7 +1972,7 @@ class ClickerApp:
                 self._key_combo_main_extended = extended
         # Live preview: show what will be committed.
         preview_mods = [name for name in KEY_MODIFIERS if name in self._key_combo_modifiers]
-        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only — release to commit)"
+        preview_text = format_combo(preview_mods, self._key_combo_main_name) or "(modifiers only - release to commit)"
         self._set_key_entry_text(self._key_capture_mode, preview_text)
         return "break"
 
@@ -2302,15 +2302,13 @@ class ClickerApp:
         missing_windows = []
         fuzzy_matched = []
         for win_title in data.get("target_windows", []):
-            found_hwnd = next((h for h, t in active_windows if t == win_title), None)
-            if not found_hwnd:
-                # Substring fallback
-                match = next(((h, t) for h, t in active_windows if win_title.lower() in t.lower()), None)
-                if match:
-                    found_hwnd, real_title = match
-                    fuzzy_matched.append((win_title, real_title))
-
+            found_hwnd = resolve_hwnd_by_title(win_title, active_windows)
             if found_hwnd:
+                # Check if it was a fuzzy match (not exact)
+                exact_match = any(t == win_title for h, t in active_windows if h == found_hwnd)
+                if not exact_match:
+                    real_title = next(t for h, t in active_windows if h == found_hwnd)
+                    fuzzy_matched.append((win_title, real_title))
                 self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
             else:
                 missing_windows.append(win_title)
