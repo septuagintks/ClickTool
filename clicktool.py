@@ -18,6 +18,7 @@ from clicktool.script import (
 from clicktool.window import (
     list_visible_windows, wait_for_windows,
     perform_screen_mouse_action, perform_window_mouse_action,
+    perform_screen_key_action, perform_window_key_action,
 )
 from clicktool.ui import ClickerApp
 
@@ -46,7 +47,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         timeout_seconds = DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS
         max_rounds = DEFAULT_AUTO_LOOP_MAX_ROUNDS
 
-    write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
+        write_auto_log(log_path, f"loaded config; mode={mode}; loop={loop_enabled}; timeout={timeout_seconds}; rounds={max_rounds}; wait={target_wait_seconds}")
 
     fallback_actions = data.get("window_positions", []) if mode == "window" else data.get("screen_positions", [])
     raw_actions = data.get("actions") or fallback_actions
@@ -63,20 +64,10 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if ptype == "wait":
                 actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
                 continue
+            entry = dict(p)
             hwnd = window_map.get(p.get("win_title"))
             if hwnd:
-                entry = {
-                    "type": ptype,
-                    "hwnd": hwnd,
-                    "x": p["x"],
-                    "y": p["y"],
-                    "delay": p.get("delay"),
-                    "win_title": p.get("win_title"),
-                }
-                if ptype == "click":
-                    entry["button"] = p.get("button", "left")
-                else:
-                    entry["delta"] = coerce_wheel_delta(p.get("delta"), -1)
+                entry["hwnd"] = hwnd
                 actions.append(entry)
             else:
                 write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
@@ -88,19 +79,10 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if ptype == "wait":
                 actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
                 continue
-            entry = {
-                "type": ptype,
-                "x": p["x"],
-                "y": p["y"],
-                "delay": p.get("delay"),
-            }
-            if ptype == "click":
-                entry["button"] = p.get("button", "left")
-            else:
-                entry["delta"] = coerce_wheel_delta(p.get("delta"), -1)
+            entry = dict(p)
             actions.append(entry)
 
-    runnable_count = sum(1 for a in actions if is_position_action(a))
+    runnable_count = sum(1 for a in actions if a.get("type", "click") != "wait")
     if not runnable_count:
         write_auto_log(log_path, "no runnable actions; exit=3")
         return 3
@@ -136,17 +118,29 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                         action["hwnd"] = hwnd
                         write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
                 if hwnd and user32.IsWindow(hwnd):
-                    if perform_window_mouse_action(hwnd, action):
-                        clicks += 1
-                        write_auto_log(log_path, f"ran window action type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
-                    else:
-                        write_auto_log(log_path, f"skipped window action outside client area type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                    if is_position_action(action):
+                        if perform_window_mouse_action(hwnd, action):
+                            clicks += 1
+                            write_auto_log(log_path, f"ran window action type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                        else:
+                            write_auto_log(log_path, f"skipped window action outside client area type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
+                    elif ptype == "key":
+                        if perform_window_key_action(hwnd, action):
+                            clicks += 1
+                            write_auto_log(log_path, f"ran window key action title={action.get('win_title')} key={action.get('key_name')}")
+                        else:
+                            write_auto_log(log_path, f"failed window key action title={action.get('win_title')} key={action.get('key_name')}")
                 else:
                     write_auto_log(log_path, f"missing window for action title={action.get('win_title')}")
             else:
-                perform_screen_mouse_action(action)
-                clicks += 1
-                write_auto_log(log_path, f"ran screen action type={ptype} x={action.get('x')} y={action.get('y')}")
+                if is_position_action(action):
+                    perform_screen_mouse_action(action)
+                    clicks += 1
+                    write_auto_log(log_path, f"ran screen action type={ptype} x={action.get('x')} y={action.get('y')}")
+                elif ptype == "key":
+                    perform_screen_key_action(action)
+                    clicks += 1
+                    write_auto_log(log_path, f"ran screen key action key={action.get('key_name')}")
 
             delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
             if delay_ms > 0:

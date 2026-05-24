@@ -45,6 +45,7 @@ def write_auto_log(log_path: str | None, message: str) -> None:
             try:
                 # Lock the entire lock file (byte 0, length 1)
                 # This creates a global mutex across all processes
+                lock_file.seek(0)
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
                 try:
                     # Now we have exclusive access - check rotation and write
@@ -57,6 +58,7 @@ def write_auto_log(log_path: str | None, message: str) -> None:
                         f.flush()
                 finally:
                     # Unlock
+                    lock_file.seek(0)
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
             except (OSError, IOError) as lock_err:
                 # Lock acquisition failed - this should be rare

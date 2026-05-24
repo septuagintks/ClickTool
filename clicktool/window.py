@@ -17,6 +17,7 @@ from .winapi import (
 )
 from .hotkey import VK_MAP
 from .script import coerce_wheel_delta, normalize_mouse_action
+from .paths import get_auto_log_path, write_auto_log, log_error
 
 MAPVK_VK_TO_VSC = 0
 MODIFIER_VK = {
@@ -237,11 +238,9 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
 
     # Log any errors that occurred during enumeration (outside callback context)
     if enum_errors:
-        from .paths import get_auto_log_path, write_auto_log
-        log_path = get_auto_log_path()
         for child_hwnd, stack in enum_errors:
-            write_auto_log(log_path, f"ERROR in EnumChildWindows callback for {child_hwnd}:\n{stack}")
-
+            write_auto_log(get_auto_log_path(), f"ERROR in EnumChildWindows callback for {child_hwnd}:\n{stack}")
+ 
     t_cl_tl_sx, t_cl_tl_sy = win32gui.ClientToScreen(target_hwnd, (0, 0))
     tx = int(sx - t_cl_tl_sx)
     ty = int(sy - t_cl_tl_sy)
