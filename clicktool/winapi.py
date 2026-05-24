@@ -61,8 +61,6 @@ XBUTTON2 = 0x0002
 MK_XBUTTON1 = 0x0020
 MK_XBUTTON2 = 0x0040
 
-CWP_SKIPINVISIBLE = 0x0001
-
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
 SM_XVIRTUALSCREEN = 76
@@ -146,6 +144,7 @@ user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
 user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
 user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
 user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
+user32.ScreenToClient.restype = wintypes.BOOL
 user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
 user32.GetCursorPos.restype = wintypes.BOOL
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
@@ -157,8 +156,6 @@ user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.restype = wintypes.BOOL
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-user32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, POINT, wintypes.UINT]
-user32.ChildWindowFromPointEx.restype = wintypes.HWND
 user32.IsIconic.argtypes = [wintypes.HWND]
 user32.IsIconic.restype = wintypes.BOOL
 user32.GetSystemMetrics.argtypes = [ctypes.c_int]
@@ -177,6 +174,9 @@ kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWS
 kernel32.GetLastError.restype = wintypes.DWORD
 kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+kernel32.FreeConsole.restype = wintypes.BOOL
 
 EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 user32.EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]

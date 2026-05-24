@@ -9,7 +9,7 @@ import win32api
 import win32con
 
 from .winapi import (
-    user32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
+    user32, kernel32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
     KBDLLHOOKSTRUCT, LowLevelKeyboardProc, WH_KEYBOARD_LL, HC_ACTION,
     LLKHF_UP, LLKHF_EXTENDED,
 )
@@ -1799,7 +1799,7 @@ class ClickerApp:
 
         # Keep the callable alive — losing the reference invalidates the hook.
         self._kb_hook_proc = LowLevelKeyboardProc(_proc)
-        h_module = ctypes.windll.kernel32.GetModuleHandleW(None)
+        h_module = kernel32.GetModuleHandleW(None)
         self._kb_hook_handle = user32.SetWindowsHookExW(
             WH_KEYBOARD_LL, self._kb_hook_proc, h_module, 0
         )
