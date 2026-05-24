@@ -1815,6 +1815,9 @@ class ClickerApp:
             return
 
         def _proc(nCode, wParam, lParam):
+            if not self._capturing_key:
+                return user32.CallNextHookEx(self._kb_hook_handle, nCode, wParam, lParam)
+
             try:
                 if nCode == HC_ACTION:
                     info = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT))[0]
