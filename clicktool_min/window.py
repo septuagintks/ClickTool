@@ -53,7 +53,10 @@ def get_client_rect(hwnd):
 
 def client_to_screen(hwnd, x, y):
     pt = POINT(x, y)
-    user32.ClientToScreen(hwnd, ctypes.byref(pt))
+    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+        from .paths import write_auto_log, get_auto_log_path
+        write_auto_log(get_auto_log_path(), f"WARNING: ClientToScreen failed for hwnd {hwnd}")
+        return int(x), int(y)
     return pt.x, pt.y
 
 
@@ -84,14 +87,23 @@ def list_visible_windows() -> list[tuple[int, str]]:
     windows: list[tuple[int, str]] = []
 
     def enum_callback(hwnd, lparam):
-        if user32.IsWindowVisible(hwnd):
-            title = get_window_title(hwnd)
-            if title:
-                windows.append((hwnd, title))
+        try:
+            if user32.IsWindowVisible(hwnd):
+                title = get_window_title(hwnd)
+                if title:
+                    windows.append((hwnd, title))
+        except Exception:
+            # Ignore exceptions for individual windows to ensure enumeration continues
+            pass
         return True
 
     cb = EnumWindowsProc(enum_callback)
-    user32.EnumWindows(cb, 0)
+    try:
+        user32.EnumWindows(cb, 0)
+    except Exception:
+        from .paths import write_auto_log, get_auto_log_path
+        import traceback
+        write_auto_log(get_auto_log_path(), f"ERROR: EnumWindows failed:\n{traceback.format_exc()}")
     return windows
 
 

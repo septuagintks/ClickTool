@@ -2321,16 +2321,39 @@ class ClickerApp:
                 if self._stop_event.is_set():
                     break
 
-                ptype = pos.get("type", "click")
+                try:
+                    ptype = pos.get("type", "click")
 
-                if ptype == "wait":
-                    wait_ms = pos.get("ms", 0)
-                    if wait_ms > 0:
-                        if self._stop_event.wait(wait_ms / 1000.0):
+                    if ptype == "wait":
+                        wait_ms = pos.get("ms", 0)
+                        if wait_ms > 0:
+                            if self._stop_event.wait(wait_ms / 1000.0):
+                                break
+                        continue
+
+                    if ptype == "key":
+                        if mode == "window":
+                            hwnd = pos.get("hwnd")
+                            if not hwnd or not user32.IsWindow(hwnd):
+                                title = pos.get("win_title")
+                                found_hwnd = resolve_hwnd_by_title(title)
+                                if found_hwnd:
+                                    hwnd = found_hwnd
+                                    pos["hwnd"] = hwnd
+                                    if title:
+                                        self._safe_after(self._update_hwnd_from_thread, title, hwnd)
+                            if hwnd and user32.IsWindow(hwnd):
+                                perform_window_key_action(hwnd, pos)
+                        else:
+                            perform_screen_key_action(pos)
+
+                        delay_ms = pos.get("delay") if pos.get("delay") is not None else global_interval_ms
+                        wait_s = delay_ms / 1000.0
+                        if wait_s > 0 and self._stop_event.wait(wait_s):
                             break
-                    continue
+                        continue
 
-                if ptype == "key":
+                    # Click or wheel -- needs a position and possibly a window
                     if mode == "window":
                         hwnd = pos.get("hwnd")
                         if not hwnd or not user32.IsWindow(hwnd):
@@ -2342,42 +2365,24 @@ class ClickerApp:
                                 if title:
                                     self._safe_after(self._update_hwnd_from_thread, title, hwnd)
                         if hwnd and user32.IsWindow(hwnd):
-                            perform_window_key_action(hwnd, pos)
+                            rect = get_window_rect(hwnd)
+                            if rect:
+                                perform_window_mouse_action(hwnd, pos)
+                        else:
+                            continue
                     else:
-                        perform_screen_key_action(pos)
+                        perform_screen_mouse_action(pos)
 
+                    # Determine wait time: per-step delay or global interval
                     delay_ms = pos.get("delay") if pos.get("delay") is not None else global_interval_ms
                     wait_s = delay_ms / 1000.0
+
                     if wait_s > 0 and self._stop_event.wait(wait_s):
                         break
-                    continue
-
-                # Click or wheel -- needs a position and possibly a window
-                if mode == "window":
-                    hwnd = pos.get("hwnd")
-                    if not hwnd or not user32.IsWindow(hwnd):
-                        title = pos.get("win_title")
-                        found_hwnd = resolve_hwnd_by_title(title)
-                        if found_hwnd:
-                            hwnd = found_hwnd
-                            pos["hwnd"] = hwnd
-                            if title:
-                                self._safe_after(self._update_hwnd_from_thread, title, hwnd)
-                    if hwnd and user32.IsWindow(hwnd):
-                        rect = get_window_rect(hwnd)
-                        if rect:
-                            perform_window_mouse_action(hwnd, pos)
-                    else:
-                        continue
-                else:
-                    perform_screen_mouse_action(pos)
-
-                # Determine wait time: per-step delay or global interval
-                delay_ms = pos.get("delay") if pos.get("delay") is not None else global_interval_ms
-                wait_s = delay_ms / 1000.0
-
-                if wait_s > 0 and self._stop_event.wait(wait_s):
-                    break
+                except Exception:
+                    log_path = get_auto_log_path()
+                    log_error(log_path, "click loop single action execution")
+                    # Continue to next action instead of crashing the whole loop
 
             # If loop is disabled, stop after one full pass
             if not loop_enabled:
