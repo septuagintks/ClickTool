@@ -35,7 +35,7 @@ from .window import (
     perform_screen_mouse_action, perform_window_mouse_action,
     perform_screen_key_action, perform_window_key_action,
 )
-from .paths import get_auto_config_path, get_auto_log_path, log_error
+from .paths import get_auto_config_path, get_auto_log_path, log_error, write_auto_log
 
 ROOT_MIN_WIDTH = 820
 ROOT_MIN_HEIGHT = 520
@@ -2637,7 +2637,7 @@ class ClickerApp:
                         if hwnd and user32.IsWindow(hwnd):
                             perform_window_key_action(hwnd, action)
                         else:
-                            perform_screen_key_action(action)
+                            write_auto_log(get_auto_log_path(), f"skipped window key action; target window missing title={action.get('win_title')} key={action.get('key_name')}")
                     else:
                         perform_screen_key_action(action)
                     delay_ms = action.get("delay")
