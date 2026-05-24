@@ -131,13 +131,17 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                     write_auto_log(log_path, f"missing window for action title={action.get('win_title')}")
             else:
                 if is_position_action(action):
-                    perform_screen_mouse_action(action)
-                    clicks += 1
-                    write_auto_log(log_path, f"ran screen action type={ptype} x={action.get('x')} y={action.get('y')}")
+                    if perform_screen_mouse_action(action):
+                        clicks += 1
+                        write_auto_log(log_path, f"ran screen action type={ptype} x={action.get('x')} y={action.get('y')}")
+                    else:
+                        write_auto_log(log_path, f"failed screen action type={ptype} x={action.get('x')} y={action.get('y')}")
                 elif ptype == "key":
-                    perform_screen_key_action(action)
-                    clicks += 1
-                    write_auto_log(log_path, f"ran screen key action key={action.get('key_name')}")
+                    if perform_screen_key_action(action):
+                        clicks += 1
+                        write_auto_log(log_path, f"ran screen key action key={action.get('key_name')}")
+                    else:
+                        write_auto_log(log_path, f"failed screen key action key={action.get('key_name')}")
 
             delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
             if delay_ms > 0:
