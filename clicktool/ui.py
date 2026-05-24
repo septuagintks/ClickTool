@@ -1781,7 +1781,7 @@ class ClickerApp:
         if self._kb_capture_watchdog is not None:
             try:
                 self.root.after_cancel(self._kb_capture_watchdog)
-            except (RuntimeError, tk.TclError):
+            except (RuntimeError, tk.TclError, ValueError):
                 pass
         try:
             self._kb_capture_watchdog = self.root.after(15000, self._on_capture_watchdog_fired)
@@ -1802,7 +1802,7 @@ class ClickerApp:
         if self._kb_capture_watchdog is not None:
             try:
                 self.root.after_cancel(self._kb_capture_watchdog)
-            except (RuntimeError, tk.TclError):
+            except (RuntimeError, tk.TclError, ValueError):
                 pass
             self._kb_capture_watchdog = None
         self._uninstall_kb_hook()
