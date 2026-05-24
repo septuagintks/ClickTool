@@ -16,7 +16,7 @@ from clicktool_min.script import (
     DEFAULT_TARGET_WAIT_SECONDS,
 )
 from clicktool_min.window import (
-    list_visible_windows, wait_for_windows,
+    wait_for_windows, resolve_hwnd_by_title,
     perform_screen_mouse_action, perform_window_mouse_action,
     perform_screen_key_action, perform_window_key_action,
 )
@@ -108,11 +108,8 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if mode == "window":
                 hwnd = action.get("hwnd")
                 if not hwnd or not user32.IsWindow(hwnd):
-                    active_windows = list_visible_windows()
                     title = action.get("win_title")
-                    found_hwnd = next((h for h, t in active_windows if t == title), None)
-                    if not found_hwnd and title:
-                        found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                    found_hwnd = resolve_hwnd_by_title(title)
                     if found_hwnd:
                         hwnd = found_hwnd
                         action["hwnd"] = hwnd

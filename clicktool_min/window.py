@@ -70,12 +70,14 @@ def get_client_bounds_in_window(hwnd):
 
 def clamp_window_position(hwnd: int, x: int, y: int) -> tuple[int, int]:
     bounds = get_client_bounds_in_window(hwnd)
-    if bounds is None:
+    if bounds is not None:
+        left, top, right, bottom = bounds
+    else:
         rect = get_window_rect(hwnd)
         if not rect:
             return int(x), int(y)
-        bounds = (0, 0, rect[2] - rect[0], rect[3] - rect[1])
-    return (max(bounds[0], min(int(x), bounds[2])), max(bounds[1], min(int(y), bounds[3])))
+        left, top, right, bottom = 0, 0, rect[2] - rect[0], rect[3] - rect[1]
+    return (max(left, min(int(x), right)), max(top, min(int(y), bottom)))
 
 
 def list_visible_windows() -> list[tuple[int, str]]:
@@ -97,13 +99,26 @@ def find_windows_by_titles(titles: list[str]) -> dict[str, int]:
     active_windows = list_visible_windows()
     found: dict[str, int] = {}
     for title in titles:
-        hwnd = next((h for h, t in active_windows if t == title), None)
-        if hwnd is None:
-            title_lower = title.lower()
-            hwnd = next((h for h, t in active_windows if title_lower in t.lower()), None)
+        hwnd = resolve_hwnd_by_title(title, active_windows)
         if hwnd:
             found[title] = hwnd
     return found
+
+
+def resolve_hwnd_by_title(title: str, active_windows: list[tuple[int, str]] | None = None) -> int | None:
+    """Resolve a window title to an HWND: exact match first, then case-insensitive substring.
+
+    Pass ``active_windows`` to avoid re-enumerating when the caller already has it.
+    """
+    if not title:
+        return None
+    if active_windows is None:
+        active_windows = list_visible_windows()
+    hwnd = next((h for h, t in active_windows if t == title), None)
+    if hwnd:
+        return hwnd
+    title_lower = title.lower()
+    return next((h for h, t in active_windows if title_lower in t.lower()), None)
 
 
 def wait_for_windows(titles: list[str], timeout_seconds: int, log_path: str | None = None) -> dict[str, int]:
