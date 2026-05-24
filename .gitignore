@@ -4,6 +4,7 @@ tmp_*
 *_temp.py
 *_tmp.py
 test_*.json
+verify_*.py
 __pycache__/
 *.py[codz]
 *$py.class
