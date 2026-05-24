@@ -62,7 +62,7 @@ def write_auto_log(log_path: str | None, message: str) -> None:
                     # Unlock
                     lock_file.seek(0)
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-            except (OSError, IOError) as lock_err:
+            except (OSError, IOError):
                 # Lock acquisition failed - this should be rare
                 # Fall back to best-effort write without lock
                 try:

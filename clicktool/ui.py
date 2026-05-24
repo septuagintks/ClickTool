@@ -1010,7 +1010,6 @@ class ClickerApp:
                 status_var.set(f"Error: {e}")
                 
         def on_drag_release(event):
-            nonlocal drag_hwnd, drag_title
             status_label.config(foreground="#0078d7")
             if drag_hwnd and drag_title:
                 hwnd = drag_hwnd

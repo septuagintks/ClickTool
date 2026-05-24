@@ -14,6 +14,21 @@ A flexible Windows mouse auto-clicker with visual draggable targets. Supports bo
    python clicktool.py
    ```
 
+## Development
+
+Install test and lint dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run checks:
+
+```bash
+python -m pytest tests
+python -m pyflakes clicktool.py clicktool
+```
+
 ## Key Features
 
 - **Screen Mode**: Position numbered dots anywhere on the screen.

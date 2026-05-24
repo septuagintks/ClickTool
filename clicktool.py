@@ -10,7 +10,7 @@ from clicktool.paths import (
     show_already_running_message,
 )
 from clicktool.script import (
-    coerce_non_negative_int, coerce_wheel_delta, infer_script_mode,
+    coerce_non_negative_int, infer_script_mode,
     is_position_action, normalize_mouse_action, read_script_file,
     DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS,
