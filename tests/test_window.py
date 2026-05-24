@@ -1,6 +1,5 @@
 """Unit tests for clicktool.window module."""
 import unittest
-from unittest.mock import patch, MagicMock
 
 try:
     from clicktool.window import resolve_hwnd_by_title

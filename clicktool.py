@@ -23,6 +23,10 @@ from clicktool.window import (
 from clicktool.ui import ClickerApp
 
 
+def is_runnable_auto_action(action: dict) -> bool:
+    return is_position_action(action) or action.get("type") == "key"
+
+
 def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     write_auto_log(log_path, f"auto run started; config={config_path}")
     if not os.path.exists(config_path):
@@ -64,6 +68,9 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if ptype == "wait":
                 actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
                 continue
+            if not is_runnable_auto_action(p):
+                write_auto_log(log_path, f"unknown action type={ptype}; skipped")
+                continue
             entry = dict(p)
             hwnd = window_map.get(p.get("win_title"))
             if hwnd:
@@ -79,10 +86,13 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
             if ptype == "wait":
                 actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
                 continue
+            if not is_runnable_auto_action(p):
+                write_auto_log(log_path, f"unknown action type={ptype}; skipped")
+                continue
             entry = dict(p)
             actions.append(entry)
 
-    runnable_count = sum(1 for a in actions if a.get("type", "click") != "wait")
+    runnable_count = sum(1 for a in actions if is_runnable_auto_action(a))
     if not runnable_count:
         write_auto_log(log_path, "no runnable actions; exit=3")
         return 3
@@ -142,6 +152,8 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                         write_auto_log(log_path, f"ran screen key action key={action.get('key_name')}")
                     else:
                         write_auto_log(log_path, f"failed screen key action key={action.get('key_name')}")
+                else:
+                    write_auto_log(log_path, f"unknown action type={ptype}; skipped")
 
             delay_ms = action.get("delay") if action.get("delay") is not None else global_interval_ms
             if delay_ms > 0:
