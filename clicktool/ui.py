@@ -2297,6 +2297,13 @@ class ClickerApp:
         missing_windows = []
         for win_title in data.get("target_windows", []):
             found_hwnd = next((h for h, t in active_windows if t == win_title), None)
+            if not found_hwnd:
+                # Substring fallback
+                match = next(((h, t) for h, t in active_windows if win_title.lower() in t.lower()), None)
+                if match:
+                    found_hwnd, real_title = match
+                    print(f"INFO: Matched '{win_title}' to '{real_title}'")
+            
             if found_hwnd:
                 self._target_windows.append({"hwnd": found_hwnd, "title": win_title})
             else:
