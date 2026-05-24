@@ -3,6 +3,7 @@ temp_*
 tmp_*
 *_temp.py
 *_tmp.py
+test_*.json
 __pycache__/
 *.py[codz]
 *$py.class

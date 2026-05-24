@@ -1114,9 +1114,10 @@ class ClickerApp:
         hwnd = self._target_windows[index]["hwnd"]
         
         # Also remove any click points associated with this window
-        to_remove = [i for i, p in enumerate(self._window_positions) if p.get("hwnd") == hwnd]
+                to_remove = [i for i, p in enumerate(self._window_positions) if p.get("hwnd") == hwnd]
         for i in reversed(to_remove):
-            self._window_positions[i]["dot"].destroy()
+            if is_position_action(self._window_positions[i]) and "dot" in self._window_positions[i]:
+                self._window_positions[i]["dot"].destroy()
             del self._window_positions[i]
             
         del self._target_windows[index]
@@ -1356,7 +1357,7 @@ class ClickerApp:
         if not sel:
             return
         index = self.screen_tree.index(sel[0])
-        if is_position_action(self._screen_positions[index]):
+                if is_position_action(self._screen_positions[index]) and "dot" in self._screen_positions[index]:
             self._screen_positions[index]["dot"].destroy()
         del self._screen_positions[index]
         self._refresh_screen_list()
@@ -1424,9 +1425,9 @@ class ClickerApp:
         else:
             self.screen_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
-    def clear_screen_positions(self) -> None:
+        def clear_screen_positions(self) -> None:
         for p in self._screen_positions:
-            if is_position_action(p):
+            if is_position_action(p) and "dot" in p:
                 p["dot"].destroy()
         self._screen_positions.clear()
         self._refresh_screen_list()
@@ -1637,7 +1638,7 @@ class ClickerApp:
         if not sel:
             return
         index = self.window_pt_tree.index(sel[0])
-        if is_position_action(self._window_positions[index]):
+                if is_position_action(self._window_positions[index]) and "dot" in self._window_positions[index]:
             self._window_positions[index]["dot"].destroy()
         del self._window_positions[index]
         self._refresh_window_pt_list()
@@ -1706,9 +1707,9 @@ class ClickerApp:
         else:
             self.window_pt_tree.set(item_id, "details", f"Delay: {item['ms']}ms")
 
-    def clear_window_positions(self) -> None:
+        def clear_window_positions(self) -> None:
         for p in self._window_positions:
-            if is_position_action(p):
+            if is_position_action(p) and "dot" in p:
                 p["dot"].destroy()
         self._window_positions.clear()
         self._refresh_window_pt_list()
