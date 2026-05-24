@@ -31,7 +31,7 @@ from .script import (
 from .window import (
     get_window_title, get_window_rect,
     get_client_bounds_in_window, clamp_window_position,
-    list_visible_windows,
+    list_visible_windows, resolve_hwnd_by_title,
     perform_screen_mouse_action, perform_window_mouse_action,
     perform_screen_key_action, perform_window_key_action,
 )
@@ -175,7 +175,7 @@ class ClickerApp:
 
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_MS))
         self.default_wait_var = tk.StringVar(value=str(DEFAULT_WAIT_MS))
-        self.step_delay_var = tk.StringVar()
+        self.pos_value_var = tk.StringVar()
         self.custom_delay_var = tk.StringVar()
         self.mouse_button_var = tk.StringVar(value="left")
         self.loop_var = tk.BooleanVar(value=True)
@@ -226,6 +226,8 @@ class ClickerApp:
         self._hotkey_thread = threading.Thread(target=self._watch_global_hotkeys, daemon=True)
         self._hotkey_thread.start()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Defer minsize computation until Tk has measured the laid-out widgets.
+        self.root.after_idle(self._compute_root_minsize)
 
     def _apply_ui_theme(self) -> None:
         style = ttk.Style()
@@ -481,8 +483,8 @@ class ClickerApp:
 
         self.screen_prop_label = ttk.Label(prop_frame, text="Value:", anchor="w")
         self.screen_prop_label.grid(row=0, column=0, sticky="w")
-        self.screen_step_delay_entry = ttk.Entry(prop_frame, textvariable=self.step_delay_var, width=14)
-        self.screen_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
+        self.screen_pos_value_entry = ttk.Entry(prop_frame, textvariable=self.pos_value_var, width=14)
+        self.screen_pos_value_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
         self.screen_key_entry = ttk.Entry(prop_frame, width=14)
         self.screen_key_entry.configure(state="readonly")
         self.screen_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
@@ -633,8 +635,8 @@ class ClickerApp:
 
         self.window_prop_label = ttk.Label(win_prop_frame, text="Value:", anchor="w")
         self.window_prop_label.grid(row=0, column=0, sticky="w")
-        self.window_step_delay_entry = ttk.Entry(win_prop_frame, textvariable=self.step_delay_var, width=14)
-        self.window_step_delay_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
+        self.window_pos_value_entry = ttk.Entry(win_prop_frame, textvariable=self.pos_value_var, width=14)
+        self.window_pos_value_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
         self.window_key_entry = ttk.Entry(win_prop_frame, width=14)
         self.window_key_entry.configure(state="readonly")
         self.window_key_entry.grid(row=0, column=1, padx=(4, 8), sticky="ew")
@@ -733,9 +735,7 @@ class ClickerApp:
                 if not hwnd or not user32.IsWindow(hwnd):
                     if active_windows is None:
                         active_windows = list_visible_windows()
-                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
-                    if not found_hwnd:
-                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    found_hwnd = resolve_hwnd_by_title(w["title"], active_windows)
                     if found_hwnd:
                         w["hwnd"] = found_hwnd
                         for p in self._window_positions:
@@ -1132,7 +1132,6 @@ class ClickerApp:
                 x, y = win32api.GetCursorPos()
             except Exception:
                 log_error(get_auto_log_path(), "Getting cursor position for screen dot")
-                pass
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
             screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
@@ -1166,7 +1165,6 @@ class ClickerApp:
                 x, y = win32api.GetCursorPos()
             except Exception:
                 log_error(get_auto_log_path(), "Getting cursor position for screen wheel")
-                pass
         if x is None or y is None:
             screen_w = user32.GetSystemMetrics(SM_CXSCREEN)
             screen_h = user32.GetSystemMetrics(SM_CYSCREEN)
@@ -1322,7 +1320,7 @@ class ClickerApp:
             self._show_screen_key_entry(False)
             self._show_screen_button_row(True)
             self.screen_prop_label.config(text="Pos:")
-            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
+            self.pos_value_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
@@ -1331,7 +1329,7 @@ class ClickerApp:
             self._show_screen_key_entry(False)
             self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wheel:")
-            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
+            self.pos_value_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.screen_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
@@ -1347,7 +1345,7 @@ class ClickerApp:
             self._show_screen_key_entry(False)
             self._show_screen_button_row(False)
             self.screen_prop_label.config(text="Wait:")
-            self.step_delay_var.set(str(pos["ms"]))
+            self.pos_value_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.screen_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
@@ -1467,8 +1465,7 @@ class ClickerApp:
                     rel_x, rel_y = rx, ry
             except Exception:
                 log_error(get_auto_log_path(), "Getting cursor position for window action")
-                pass
-                
+
         if rel_x is None or rel_y is None:
             rel_x, rel_y = win_w // 2, win_h // 2
             if self.pure_background_window_click_var.get():
@@ -1603,7 +1600,7 @@ class ClickerApp:
             self._show_window_key_entry(False)
             self._show_window_button_row(True)
             self.window_prop_label.config(text="Pos:")
-            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])}")
+            self.pos_value_var.set(f"{int(pos['x'])},{int(pos['y'])}")
             self.mouse_button_var.set(pos.get("button", "left"))
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
@@ -1612,7 +1609,7 @@ class ClickerApp:
             self._show_window_key_entry(False)
             self._show_window_button_row(False)
             self.window_prop_label.config(text="Wheel:")
-            self.step_delay_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
+            self.pos_value_var.set(f"{int(pos['x'])},{int(pos['y'])},{coerce_wheel_delta(pos.get('delta'), -1)}")
             self.custom_delay_var.set(str(pos.get("delay") or ""))
             self.window_custom_delay_entry.config(state="normal")
             self._set_button_controls_enabled(False)
@@ -1628,7 +1625,7 @@ class ClickerApp:
             self._show_window_key_entry(False)
             self._show_window_button_row(False)
             self.window_prop_label.config(text="Wait:")
-            self.step_delay_var.set(str(pos["ms"]))
+            self.pos_value_var.set(str(pos["ms"]))
             self.custom_delay_var.set("")
             self.window_custom_delay_entry.config(state="disabled")
             self._set_button_controls_enabled(False)
@@ -1720,19 +1717,19 @@ class ClickerApp:
 
     def _show_screen_key_entry(self, show: bool) -> None:
         if show:
-            self.screen_step_delay_entry.grid_remove()
+            self.screen_pos_value_entry.grid_remove()
             self.screen_key_entry.grid()
         else:
             self.screen_key_entry.grid_remove()
-            self.screen_step_delay_entry.grid()
+            self.screen_pos_value_entry.grid()
 
     def _show_window_key_entry(self, show: bool) -> None:
         if show:
-            self.window_step_delay_entry.grid_remove()
+            self.window_pos_value_entry.grid_remove()
             self.window_key_entry.grid()
         else:
             self.window_key_entry.grid_remove()
-            self.window_step_delay_entry.grid()
+            self.window_pos_value_entry.grid()
 
     def _key_entry_for_mode(self, mode: str) -> ttk.Entry:
         return self.screen_key_entry if mode == "screen" else self.window_key_entry
@@ -1817,15 +1814,13 @@ class ClickerApp:
                     vk = int(info.vkCode)
                     scan = int(info.scanCode)
                     # Marshal into the Tk thread; swallow the key so the OS
-                    # doesn't act on Win+R, Win+E, Alt+Tab, etc.
+                    # doesn't act on Win+R, Win+E, Alt+Tab, etc. The 15s
+                    # capture watchdog (_arm_capture_watchdog) is the safety
+                    # net that uninstalls the hook even if the user walks away.
                     self._safe_after(self._on_low_level_key, vk, is_up, scan, is_extended)
-                    # We return 1 to swallow the event so system hotkeys like Win+D or Alt+Tab
-                    # don't trigger during capture, but this risks disrupting normal OS use
-                    # if the hook isn't uninstalled properly.
                     return 1  # non-zero == handled/suppressed
             except Exception:
                 log_error(get_auto_log_path(), "Processing low-level keyboard hook")
-                pass
             return user32.CallNextHookEx(self._kb_hook_handle, nCode, wParam, lParam)
 
         # Keep the callable alive — losing the reference invalidates the hook.
@@ -2064,7 +2059,7 @@ class ClickerApp:
             messagebox.showinfo("Selection Required", "Select a position first.")
             return
         
-        val = self.step_delay_var.get().strip()
+        val = self.pos_value_var.get().strip()
         index = tree.index(sel[0])
         if not (0 <= index < len(positions)):
             return
@@ -2491,9 +2486,7 @@ class ClickerApp:
             for w in self._target_windows:
                 hwnd = w["hwnd"]
                 if not hwnd or not user32.IsWindow(hwnd):
-                    found_hwnd = next((h for h, t in active_windows if t == w["title"]), None)
-                    if not found_hwnd:
-                        found_hwnd = next((h for h, t in active_windows if w["title"].lower() in t.lower()), None)
+                    found_hwnd = resolve_hwnd_by_title(w["title"], active_windows)
                     if found_hwnd:
                         w["hwnd"] = found_hwnd
                         for p in self._window_positions:
@@ -2631,11 +2624,8 @@ class ClickerApp:
                     if mode == "window":
                         hwnd = action.get("hwnd")
                         if not hwnd or not user32.IsWindow(hwnd):
-                            active_windows = list_visible_windows()
                             title = action.get("win_title")
-                            found_hwnd = next((h for h, t in active_windows if t == title), None)
-                            if not found_hwnd and title:
-                                found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                            found_hwnd = resolve_hwnd_by_title(title)
                             if found_hwnd:
                                 hwnd = found_hwnd
                                 action["hwnd"] = hwnd
@@ -2656,11 +2646,8 @@ class ClickerApp:
                     if mode == "window":
                         hwnd = action.get("hwnd")
                         if not hwnd or not user32.IsWindow(hwnd):
-                            active_windows = list_visible_windows()
                             title = action.get("win_title")
-                            found_hwnd = next((h for h, t in active_windows if t == title), None)
-                            if not found_hwnd and title:
-                                found_hwnd = next((h for h, t in active_windows if title.lower() in t.lower()), None)
+                            found_hwnd = resolve_hwnd_by_title(title)
                             if found_hwnd:
                                 hwnd = found_hwnd
                                 action["hwnd"] = hwnd

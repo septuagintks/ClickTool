@@ -230,11 +230,11 @@ def write_script_file(file_path: str, data: dict) -> None:
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
         os.replace(temp_path, file_path)
-    except Exception as e:
+    except Exception:
         log_error(get_auto_log_path(), f"write_script_file({file_path})")
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except Exception:
+            except OSError:
                 pass
-        raise e
+        raise
