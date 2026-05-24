@@ -1868,7 +1868,13 @@ class ClickerApp:
         self._kb_hook_proc = None
 
     def _on_low_level_key(self, nCode, wParam, lParam) -> int:
-        if nCode == HC_ACTION and self._capturing_key:
+        if not self._capturing_key:
+            try:
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+            except Exception:
+                return 0
+
+        if nCode == HC_ACTION:
             try:
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                 vk = kb.vkCode
@@ -1880,17 +1886,12 @@ class ClickerApp:
                     self._safe_after(self._on_key_capture_release, vk)
                 else:
                     self._safe_after(self._on_key_capture_press, vk, scan, extended)
-                # Swallow the event so system hotkeys like Win+D or Alt+Tab don't
-                # trigger during capture. The 15s capture watchdog
-                # (_arm_capture_watchdog) is the safety net that uninstalls the
-                # hook even if the user walks away.
                 return 1
             except Exception:
                 log_error(get_auto_log_path(), "Processing low-level keyboard hook")
         try:
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
         except Exception:
-            log_error(get_auto_log_path(), "CallNextHookEx in keyboard hook")
             return 0
 
     def _begin_key_capture(self, mode: str) -> None:
