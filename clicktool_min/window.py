@@ -8,7 +8,8 @@ from .winapi import (
     KEYEVENTF_KEYUP, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_SCANCODE,
     VK_LWIN, VK_RWIN,
     BUTTON_INPUT_MAP, BUTTON_MESSAGE_MAP,
-    CWP_SKIPINVISIBLE, EnumWindowsProc,
+    EnumWindowsProc,
+    CWP_SKIPINVISIBLE, # Used in ChildWindowFromPointEx to skip invisible windows
     makelong, make_wparam, enable_dpi_awareness,
 )
 from .hotkey import VK_MAP
