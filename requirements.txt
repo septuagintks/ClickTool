@@ -1,0 +1,1 @@
+# This branch is for the minified version of the click tool, which needs no dependencies. The requirements.txt file is left empty to reflect this fact.

@@ -12,7 +12,7 @@ from .winapi import (
     SM_CXSCREEN, SM_CYSCREEN, WHEEL_DELTA,
     WM_MOUSEWHEEL, WM_LBUTTONDOWN, WM_LBUTTONUP,
     BUTTON_INPUT_MAP, BUTTON_MESSAGE_MAP,
-    CWP_SKIPINVISIBLE, EnumWindowsProc,
+    EnumWindowsProc,
     KBDLLHOOKSTRUCT, LowLevelKeyboardProc,
     WH_KEYBOARD_LL, HC_ACTION, LLKHF_EXTENDED, LLKHF_UP,
     makelong, make_wparam, enable_dpi_awareness, sleep_until_deadline,

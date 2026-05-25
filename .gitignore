@@ -8,6 +8,7 @@ main_ct.py
 
 # Local development notes
 /DEVELOPMENT_OVERVIEW.md
+/AUDIT_FIX_OVERVIEW.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
