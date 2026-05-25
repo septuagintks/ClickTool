@@ -267,17 +267,26 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     
     # Check lightweight cache: (parent_hwnd, x, y, pure_background, parent_rect) -> (target_hwnd, client_bounds)
     cache_key = (hwnd, x, y, pure_background, rect)
-    if cache_key in _child_hwnd_cache:
-        cached_hwnd, cached_bounds = _child_hwnd_cache[cache_key]
-        # Verify the cached hwnd is still valid and the point is still in its bounds
-        if user32.IsWindow(cached_hwnd):
-            left, top, right, bottom = cached_bounds
-            if 0 <= sx - left < (right - left) and 0 <= sy - top < (bottom - top):
-                # Cache hit! Move to end to maintain LRU order and use the result
-                _child_hwnd_cache.move_to_end(cache_key)
-                return post_window_mouse_action(cached_hwnd, action, sx - left, sy - top, sx, sy)
-        # Cache miss: remove stale entry and continue with enumeration
-        del _child_hwnd_cache[cache_key]
+    try:
+        if cache_key in _child_hwnd_cache:
+            cached_hwnd, cached_bounds = _child_hwnd_cache[cache_key]
+            # Verify the cached hwnd is still valid and the point is still in its bounds
+            if user32.IsWindow(cached_hwnd):
+                left, top, right, bottom = cached_bounds
+                if 0 <= sx - left < (right - left) and 0 <= sy - top < (bottom - top):
+                    # Cache hit! Move to end to maintain LRU order and use the result
+                    try:
+                        _child_hwnd_cache.move_to_end(cache_key)
+                    except KeyError:
+                        pass # Another thread deleted it
+                    return post_window_mouse_action(cached_hwnd, action, sx - left, sy - top, sx, sy)
+            # Cache miss or invalid: remove stale entry and continue with enumeration
+            try:
+                del _child_hwnd_cache[cache_key]
+            except KeyError:
+                pass
+    except KeyError:
+        pass # Handle race conditions during check or access
     
     enum_errors: list[tuple[int, str]] = []
 
@@ -312,10 +321,16 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
 
     if 0 <= tx < cw and 0 <= ty < ch:
         # Update cache with the resolved target hwnd and its bounds
-        _child_hwnd_cache[cache_key] = (target_hwnd, (t_cl_tl_sx, t_cl_tl_sy, t_cl_tl_sx + cw, t_cl_tl_sy + ch))
-        # LRU eviction: keep the cache within size limits
-        if len(_child_hwnd_cache) > MAX_CHILD_HWND_CACHE_SIZE:
-            _child_hwnd_cache.popitem(last=False)
+        try:
+            _child_hwnd_cache[cache_key] = (target_hwnd, (t_cl_tl_sx, t_cl_tl_sy, t_cl_tl_sx + cw, t_cl_tl_sy + ch))
+            # LRU eviction: keep the cache within size limits
+            if len(_child_hwnd_cache) > MAX_CHILD_HWND_CACHE_SIZE:
+                try:
+                    _child_hwnd_cache.popitem(last=False)
+                except KeyError:
+                    pass # Already empty or modified by another thread
+        except Exception:
+            pass # General safety for concurrent modifications
         return post_window_mouse_action(target_hwnd, action, tx, ty, sx, sy)
 
     if pure_background:
