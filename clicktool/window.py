@@ -33,7 +33,7 @@ EXTENDED_VK = {
 }
 
 # Lightweight cache for window child search results
-# Key: (parent_hwnd, x, y, pure_background), Value: (target_hwnd, client_bounds)
+# Key: (parent_hwnd, x, y, pure_background, parent_rect), Value: (target_hwnd, client_bounds)
 _child_hwnd_cache: dict = {}
 
 
@@ -263,8 +263,8 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     target_hwnd = hwnd
     best_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
     
-    # Check lightweight cache: (parent_hwnd, x, y, pure_background) -> (target_hwnd, client_bounds)
-    cache_key = (hwnd, x, y, pure_background)
+    # Check lightweight cache: (parent_hwnd, x, y, pure_background, parent_rect) -> (target_hwnd, client_bounds)
+    cache_key = (hwnd, x, y, pure_background, rect)
     if cache_key in _child_hwnd_cache:
         cached_hwnd, cached_bounds = _child_hwnd_cache[cache_key]
         # Verify the cached hwnd is still valid and the point is still in its bounds
