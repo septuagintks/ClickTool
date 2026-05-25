@@ -18,6 +18,7 @@ An ultra-lightweight, **zero-dependency** Windows mouse auto-clicker. Uses direc
 - **Drag & Drop Targeting**: Hold and drag the crosshair icon onto any window to target it instantly.
 - **Visual Setup**: Draggable numbered dots for easy positioning.
 - **Self-Healing**: Automatically re-finds target windows by title if they are closed and reopened.
+- **Robustness**: Automatic validation of action types with error logging to prevent silent script failure.
 - **Automation**: Headless mode for Task Scheduler (`--auto --silent`).
 
 ## Usage
