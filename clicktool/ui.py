@@ -31,7 +31,7 @@ from .script import (
 from .window import (
     get_window_title, get_window_rect,
     get_client_bounds_in_window, clamp_window_position,
-    list_visible_windows, resolve_hwnd_by_title,
+    list_visible_windows, find_windows_by_titles, resolve_hwnd_by_title,
     perform_screen_mouse_action, perform_window_mouse_action,
     perform_screen_key_action, perform_window_key_action,
 )
