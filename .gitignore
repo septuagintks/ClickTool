@@ -11,6 +11,7 @@ __pycache__/
 
 # Local development notes
 /DEVELOPMENT_OVERVIEW.md
+/AUDIT_FIX_OVERVIEW.md
 
 # C extensions
 *.so

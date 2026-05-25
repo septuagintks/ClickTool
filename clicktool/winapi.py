@@ -178,9 +178,6 @@ kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.FreeConsole.restype = wintypes.BOOL
 
-EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-user32.EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]
-
 BUTTON_MESSAGE_MAP = {
     "left": (WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON, 0, 0),
     "right": (WM_RBUTTONDOWN, WM_RBUTTONUP, 0x0002, 0, 0),

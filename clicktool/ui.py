@@ -9,7 +9,7 @@ import win32api
 import win32con
 
 from .winapi import (
-    user32, kernel32, VK_ESCAPE, EnumWindowsProc, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
+    user32, kernel32, VK_ESCAPE, enable_dpi_awareness, SM_CXSCREEN, SM_CYSCREEN,
     KBDLLHOOKSTRUCT, LowLevelKeyboardProc, WH_KEYBOARD_LL, HC_ACTION,
     LLKHF_UP, LLKHF_EXTENDED,
 )
@@ -1066,15 +1066,13 @@ class ClickerApp:
                     scan_buffer.append((hwnd, title))
             return True
 
-        enum_proc = EnumWindowsProc(enum_callback)
-
         def refresh_list():
             if not dialog.winfo_exists():
                 return
 
             nonlocal current_windows
             scan_buffer.clear()
-            user32.EnumWindows(enum_proc, 0)
+            win32gui.EnumWindows(enum_callback, None)
             new_windows = sorted(scan_buffer, key=lambda x: x[1].lower())
 
             if new_windows != current_windows:
