@@ -602,7 +602,7 @@ class ClickerApp:
 
         win_btn_row = ttk.Frame(win_frame)
         win_btn_row.pack(fill="x")
-        ttk.Button(win_btn_row, text="Add Window", command=self.add_target_window).pack(side="left", padx=2)
+        ttk.Button(win_btn_row, text="Add Window", command=self._on_target_win_add).pack(side="left", padx=2)
         ttk.Button(win_btn_row, text="Remove", command=self.remove_target_window).pack(side="left", padx=2)
 
         # Right: Click Point Column
@@ -1751,7 +1751,7 @@ class ClickerApp:
             self.stop_clicking()
         elif action == "add_window":
             self.notebook.select(1)
-            self.add_target_window()
+            self._on_target_win_add()
         elif action == "add_dot":
             self.add_current_dot()
         elif action == "add_wheel":

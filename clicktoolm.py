@@ -2,8 +2,9 @@ import argparse
 import os
 import sys
 import time
+import tkinter as tk
 
-from clicktool_min.winapi import user32, kernel32, sleep_until_deadline
+from clicktool_min.winapi import user32, kernel32, sleep_until_deadline, enable_dpi_awareness
 from clicktool_min.paths import (
     get_auto_config_path, get_auto_log_path, write_auto_log,
     acquire_single_instance_mutex, release_single_instance_mutex,
@@ -203,9 +204,8 @@ def main():
             return 4
 
         try:
-            root = tk.Tk()
-            app = ClickerApp(root)
-            root.mainloop()
+            app = ClickerApp()
+            app.root.mainloop()
         finally:
             release_single_instance_mutex(mutex)
 
