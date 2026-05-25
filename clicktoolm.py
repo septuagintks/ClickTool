@@ -23,10 +23,6 @@ from clicktool_min.window import (
 from clicktool_min.ui import ClickerApp
 
 
-def is_runnable_auto_action(action: dict) -> bool:
-    return is_position_action(action) or action.get("type") == "key"
-
-
 def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     write_auto_log(log_path, f"auto run started; config={config_path}")
     if not os.path.exists(config_path):
@@ -56,43 +52,31 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     fallback_actions = data.get("window_positions", []) if mode == "window" else data.get("screen_positions", [])
     raw_actions = data.get("actions") or fallback_actions
 
+    window_map = {}
     if mode == "window":
         titles = set(data.get("target_windows", []))
         titles.update(p.get("win_title") for p in fallback_actions if p.get("win_title"))
-        titles = sorted(titles)
-        window_map = wait_for_windows(titles, target_wait_seconds, log_path)
-        actions = []
-        for p in raw_actions:
-            normalize_mouse_action(p)
-            ptype = p.get("type", "click")
-            if ptype == "wait":
-                actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
-                continue
-            if not is_runnable_auto_action(p):
-                write_auto_log(log_path, f"unknown action type={ptype}; skipped")
-                continue
-            entry = dict(p)
-            hwnd = window_map.get(p.get("win_title"))
-            if hwnd:
-                entry["hwnd"] = hwnd
-                actions.append(entry)
-            else:
-                write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
-    else:
-        actions = []
-        for p in raw_actions:
-            normalize_mouse_action(p)
-            ptype = p.get("type", "click")
-            if ptype == "wait":
-                actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
-                continue
-            if not is_runnable_auto_action(p):
-                write_auto_log(log_path, f"unknown action type={ptype}; skipped")
-                continue
-            entry = dict(p)
-            actions.append(entry)
+        window_map = wait_for_windows(sorted(titles), target_wait_seconds, log_path)
 
-    runnable_count = sum(1 for a in actions if is_runnable_auto_action(a))
+    actions = []
+    for p in raw_actions:
+        normalize_mouse_action(p)
+        ptype = p.get("type", "click")
+        if ptype == "wait":
+            actions.append({"type": "wait", "ms": coerce_non_negative_int(p.get("ms"), 0)})
+        elif is_position_action(p) or ptype == "key":
+            entry = dict(p)
+            if mode == "window":
+                hwnd = window_map.get(p.get("win_title"))
+                if not hwnd:
+                    write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
+                    continue
+                entry["hwnd"] = hwnd
+            actions.append(entry)
+        else:
+            write_auto_log(log_path, f"unknown action type={ptype}; skipped")
+
+    runnable_count = sum(1 for a in actions if a.get("type") != "wait")
     if not runnable_count:
         write_auto_log(log_path, "no runnable actions; exit=3")
         return 3
@@ -158,87 +142,75 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                 sleep_until_deadline(delay_ms / 1000.0, deadline)
         rounds += 1
         write_auto_log(log_path, f"finished round {rounds}; clicks={clicks}")
-        if not loop_enabled:
-            write_auto_log(log_path, "loop disabled; exit=0")
-            return 0
-        if max_rounds > 0 and rounds >= max_rounds:
-            write_auto_log(log_path, "max rounds reached; exit=0")
-            return 0
-        # Yield 1ms each round so configs with all-zero delays don't pin a CPU core
-        sleep_until_deadline(0.001, deadline)
+        if not loop_enabled or (max_rounds > 0 and rounds >= max_rounds):
+            break
+
+    write_auto_log(log_path, "auto run finished; exit=0")
+    return 0
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Mouse Click Tool Minified")
-    parser.add_argument("--auto", action="store_true", help="Run saved auto startup config")
-    parser.add_argument("--silent", action="store_true", help="Suppress UI messages in automation mode")
-    parser.add_argument("--config", help="Optional config path for --auto")
-    return parser.parse_args(argv)
+def parse_args():
+    parser = argparse.ArgumentParser(description="ClickTool Minified - A zero-dependency auto clicker")
+    parser.add_argument("--auto", action="store_true", help="Run in auto mode using the provided config")
+    parser.add_argument("--config", type=str, help="Path to the JSON config file (default: auto_config.json in app data)")
+    parser.add_argument("--silent", action="store_true", help="Suppress console window in auto mode")
+    return parser.parse_args()
 
 
-def _reexec_with_pythonw_if_needed(args) -> bool:
-    """Re-launch under pythonw.exe to drop the console window (GUI mode only).
+def _reexec_with_pythonw_if_needed():
+    """If running with python.exe (has console) and NOT in auto mode, re-exec with pythonw.exe."""
+    executable = sys.executable
+    if not executable.lower().endswith("python.exe"):
+        return
 
-    Returns True (and spawns pythonw child) so main() can exit immediately.
-    Returns False when re-exec is not needed or not possible.
-    """
+    if "--auto" in sys.argv:
+        return
+
+    pythonw = executable.lower().replace("python.exe", "pythonw.exe")
+    if os.path.exists(pythonw):
+        import subprocess
+        # DETACHED_PROCESS = 0x00000008
+        subprocess.Popen([pythonw] + sys.argv, creationflags=0x00000008)
+        sys.exit(0)
+
+
+def main():
+    args = parse_args()
+    enable_dpi_awareness()
+
     if args.auto:
-        return False
-    if getattr(sys, "frozen", False):
-        return False
-    exe = os.path.basename(sys.executable).lower()
-    if exe != "python.exe":
-        return False
-    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-    if not os.path.exists(pythonw):
-        try:
+        if args.silent:
             kernel32.FreeConsole()
-        except (AttributeError, OSError):
-            pass
-        return False
-    import subprocess
-    DETACHED_PROCESS = 0x00000008
-    CREATE_NEW_PROCESS_GROUP = 0x00000200
-    subprocess.Popen(
-        [pythonw, *sys.argv],
-        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-        close_fds=True,
-    )
-    return True
 
+        config_path = args.config or get_auto_config_path()
+        log_path = get_auto_log_path()
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+        mutex = acquire_single_instance_mutex()
+        if not mutex:
+            write_auto_log(log_path, "another instance is already running; exit=4")
+            return 4
 
-    if _reexec_with_pythonw_if_needed(args):
-        return 0
-
-    if args.auto and args.silent:
         try:
-            kernel32.FreeConsole()
-        except (AttributeError, OSError):
-            pass
+            return run_auto_config(config_path, log_path)
+        finally:
+            release_single_instance_mutex(mutex)
+    else:
+        _reexec_with_pythonw_if_needed()
 
-    mutex_handle = acquire_single_instance_mutex()
-    if mutex_handle is None:
-        if not args.silent:
+        mutex = acquire_single_instance_mutex()
+        if not mutex:
             show_already_running_message()
-        return 4
+            return 4
 
-    try:
-        if args.auto:
-            config_path = args.config or get_auto_config_path()
-            log_path = get_auto_log_path()
-            write_auto_log(log_path, f"process started; argv={argv if argv is not None else sys.argv[1:]}")
-            result = run_auto_config(config_path, log_path)
-            write_auto_log(log_path, f"process finished; exit={result}")
-            return result
+        try:
+            root = tk.Tk()
+            app = ClickerApp(root)
+            root.mainloop()
+        finally:
+            release_single_instance_mutex(mutex)
 
-        ClickerApp().run()
-        return 0
-    finally:
-        release_single_instance_mutex(mutex_handle)
+    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
