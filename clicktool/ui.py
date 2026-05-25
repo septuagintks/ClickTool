@@ -1870,23 +1870,36 @@ class ClickerApp:
                     # UnhookWindowsHookEx returned False - this is a failure
                     last_error = kernel32.GetLastError()
                     log_path = get_auto_log_path()
+                    
+                    # Common error codes for UnhookWindowsHookEx failures
+                    ERROR_INVALID_HOOK_HANDLE = 1404
+                    ERROR_HOOK_NOT_INSTALLED = 1405
+                    
+                    # If hook is already invalid/not installed, safe to clean up references
+                    if last_error in (ERROR_INVALID_HOOK_HANDLE, ERROR_HOOK_NOT_INSTALLED):
+                        write_auto_log(log_path, f"INFO: Hook already invalid or not installed (GetLastError={last_error}); cleaning up references")
+                        self._kb_hook_handle = None
+                        self._kb_hook_proc = None
+                        return
+                    
+                    # For unknown failures, retain references and alert user
                     write_auto_log(log_path, f"CRITICAL: UnhookWindowsHookEx returned False, GetLastError={last_error} (PID={os.getpid()}, TID={threading.get_ident()})")
                     self._safe_after(
                         lambda: messagebox.showerror(
                             "Critical: Keyboard Hook Uninstall Failed",
-                            "Failed to uninstall the keyboard hook!\n\n"
+                            "Failed to uninstall the keyboard hook.\n\n"
                             "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
                             "Please restart ClickTool immediately. If the issue persists, restart your computer."
                         )
                     )
-                    # Do NOT clear the handle references - keep them so we know the hook is still active
+                    # Do NOT clear the handle references - keep them so we know the hook is still potentially active
                     return
             except Exception:
                 log_error(get_auto_log_path(), "Uninstalling keyboard hook (exception)")
                 self._safe_after(
                     lambda: messagebox.showerror(
                         "Critical: Keyboard Hook Uninstall Failed",
-                        "Failed to uninstall the keyboard hook!\n\n"
+                        "Failed to uninstall the keyboard hook.\n\n"
                         "System hotkeys (Win+R, Alt+Tab, etc.) may remain suppressed.\n"
                         "Please restart ClickTool immediately. If the issue persists, restart your computer."
                     )
@@ -2600,10 +2613,18 @@ class ClickerApp:
     def _watch_global_hotkeys(self) -> None:
         last_fired: dict[str, float] = {}
         debounce_seconds = HOTKEY_DEBOUNCE_SECONDS
-        while not self._app_stop_event.wait(HOTKEY_POLL_INTERVAL_SECONDS):
-            if self._capturing_key:
-                continue
+        while True:
+            # When hotkeys are disabled, use longer wait to reduce unnecessary polling
             if not self.enable_global_hotkeys_var.get():
+                if self._app_stop_event.wait(0.5):
+                    break
+                continue
+            
+            # When hotkeys are enabled, use normal poll interval
+            if self._app_stop_event.wait(HOTKEY_POLL_INTERVAL_SECONDS):
+                break
+            
+            if self._capturing_key:
                 continue
             try:
                 hotkey_map = dict(self._hotkey_map)

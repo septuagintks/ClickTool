@@ -4,7 +4,7 @@ import traceback
 import win32gui
 
 from .winapi import (
-    user32, POINT, RECT, WM_MOUSEWHEEL, WHEEL_DELTA,
+    user32, kernel32, POINT, RECT, WM_MOUSEWHEEL, WHEEL_DELTA,
     MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
     BUTTON_MESSAGE_MAP, BUTTON_INPUT_MAP,
     INPUT, MOUSEINPUT, KEYBDINPUT, INPUT_MOUSE, INPUT_KEYBOARD,
@@ -31,6 +31,10 @@ EXTENDED_VK = {
     0x21, 0x22, 0x23, 0x24, 0x2D, 0x2E,  # PageUp/Down, End, Home, Insert, Delete
     0x25, 0x26, 0x27, 0x28,              # arrows
 }
+
+# Lightweight cache for window child search results
+# Key: (parent_hwnd, x, y, pure_background), Value: (target_hwnd, client_bounds)
+_child_hwnd_cache: dict = {}
 
 
 def get_window_title(hwnd):
@@ -93,10 +97,13 @@ def list_visible_windows() -> list[tuple[int, str]]:
     windows: list[tuple[int, str]] = []
 
     def enum_callback(hwnd, lparam):
-        if user32.IsWindowVisible(hwnd):
-            title = get_window_title(hwnd)
-            if title:
-                windows.append((hwnd, title))
+        try:
+            if user32.IsWindowVisible(hwnd):
+                title = get_window_title(hwnd)
+                if title:
+                    windows.append((hwnd, title))
+        except Exception:
+            pass
         return True
 
     win32gui.EnumWindows(enum_callback, None)
@@ -182,6 +189,9 @@ def perform_screen_mouse_action(action: dict) -> bool:
         inputs = (INPUT * 3)(inp_move, inp_down, inp_up)
         sent = user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
         if sent != 3:
+            last_error = kernel32.GetLastError()
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"ERROR: perform_screen_mouse_action(click) SendInput returned {sent}/3, GetLastError={last_error}")
             return False
         return True
 
@@ -192,6 +202,10 @@ def perform_screen_mouse_action(action: dict) -> bool:
         inp_wheel.iu.mi = MOUSEINPUT(0, 0, delta * WHEEL_DELTA, MOUSEEVENTF_WHEEL, 0, None)
         inputs = (INPUT * 2)(inp_move, inp_wheel)
         sent = user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+        if sent != 2:
+            last_error = kernel32.GetLastError()
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"ERROR: perform_screen_mouse_action(wheel) SendInput returned {sent}/2, GetLastError={last_error}")
         return sent == 2
 
     return False
@@ -206,18 +220,28 @@ def post_window_mouse_action(target_hwnd: int, action: dict, client_x: int, clie
             BUTTON_MESSAGE_MAP["left"],
         )
         lparam = makelong(client_x, client_y)
-        win32gui.PostMessage(target_hwnd, down_msg, make_wparam(down_low_word, down_high_word), lparam)
-        win32gui.PostMessage(target_hwnd, up_msg, make_wparam(0, up_high_word), lparam)
+        down_result = win32gui.PostMessage(target_hwnd, down_msg, make_wparam(down_low_word, down_high_word), lparam)
+        up_result = win32gui.PostMessage(target_hwnd, up_msg, make_wparam(0, up_high_word), lparam)
+        if not down_result or not up_result:
+            last_error = kernel32.GetLastError()
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"ERROR: post_window_mouse_action(click) PostMessage failed for hwnd={target_hwnd}, down={down_result}, up={up_result}, GetLastError={last_error}")
+            return False
         return True
 
     if action_type == "wheel":
         delta = coerce_wheel_delta(action.get("delta"), -1)
-        win32gui.PostMessage(
+        result = win32gui.PostMessage(
             target_hwnd,
             WM_MOUSEWHEEL,
             make_wparam(0, delta * WHEEL_DELTA),
             makelong(screen_x, screen_y),
         )
+        if not result:
+            last_error = kernel32.GetLastError()
+            log_path = get_auto_log_path()
+            write_auto_log(log_path, f"ERROR: post_window_mouse_action(wheel) PostMessage failed for hwnd={target_hwnd}, GetLastError={last_error}")
+            return False
         return True
 
     return False
@@ -238,6 +262,20 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     sy = int(rect[1] + y)
     target_hwnd = hwnd
     best_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+    
+    # Check lightweight cache: (parent_hwnd, x, y, pure_background) -> (target_hwnd, client_bounds)
+    cache_key = (hwnd, x, y, pure_background)
+    if cache_key in _child_hwnd_cache:
+        cached_hwnd, cached_bounds = _child_hwnd_cache[cache_key]
+        # Verify the cached hwnd is still valid and the point is still in its bounds
+        if user32.IsWindow(cached_hwnd):
+            left, top, right, bottom = cached_bounds
+            if 0 <= sx - left < (right - left) and 0 <= sy - top < (bottom - top):
+                # Cache hit! Use the cached result
+                return post_window_mouse_action(cached_hwnd, action, sx - left, sy - top, sx, sy)
+        # Cache miss: remove stale entry and continue with enumeration
+        del _child_hwnd_cache[cache_key]
+    
     enum_errors: list[tuple[int, str]] = []
 
     def enum_cb(child_hwnd, lparam):
@@ -270,6 +308,8 @@ def perform_window_mouse_action(hwnd: int, action: dict, pure_background: bool =
     ch = t_cl_rect.bottom - t_cl_rect.top
 
     if 0 <= tx < cw and 0 <= ty < ch:
+        # Update cache with the resolved target hwnd and its bounds
+        _child_hwnd_cache[cache_key] = (target_hwnd, (t_cl_tl_sx, t_cl_tl_sy, t_cl_tl_sx + cw, t_cl_tl_sy + ch))
         return post_window_mouse_action(target_hwnd, action, tx, ty, sx, sy)
 
     if pure_background:
@@ -363,6 +403,10 @@ def perform_screen_key_action(action: dict) -> bool:
         return False
     arr = (INPUT * len(sequence))(*sequence)
     sent = user32.SendInput(len(sequence), arr, ctypes.sizeof(INPUT))
+    if sent != len(sequence):
+        last_error = kernel32.GetLastError()
+        log_path = get_auto_log_path()
+        write_auto_log(log_path, f"ERROR: perform_screen_key_action SendInput returned {sent}/{len(sequence)}, GetLastError={last_error}")
     return sent == len(sequence)
 
 
@@ -379,10 +423,21 @@ def perform_window_key_action(hwnd: int, action: dict) -> bool:
     down_msg = WM_SYSKEYDOWN if use_sys else WM_KEYDOWN
     up_msg = WM_SYSKEYUP if use_sys else WM_KEYUP
 
+    failed = False
     for mvk in mod_vks:
-        win32gui.PostMessage(hwnd, WM_KEYDOWN, mvk, 0)
-    win32gui.PostMessage(hwnd, down_msg, vk, 0)
-    win32gui.PostMessage(hwnd, up_msg, vk, 0)
+        if not win32gui.PostMessage(hwnd, WM_KEYDOWN, mvk, 0):
+            failed = True
+    if not win32gui.PostMessage(hwnd, down_msg, vk, 0):
+        failed = True
+    if not win32gui.PostMessage(hwnd, up_msg, vk, 0):
+        failed = True
     for mvk in reversed(mod_vks):
-        win32gui.PostMessage(hwnd, WM_KEYUP, mvk, 0)
-    return True
+        if not win32gui.PostMessage(hwnd, WM_KEYUP, mvk, 0):
+            failed = True
+    
+    if failed:
+        last_error = kernel32.GetLastError()
+        log_path = get_auto_log_path()
+        write_auto_log(log_path, f"ERROR: perform_window_key_action PostMessage failed for hwnd={hwnd}, vk={vk}, modifiers={modifiers}, GetLastError={last_error}")
+    
+    return not failed
