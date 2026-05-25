@@ -56,11 +56,14 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     window_map = {}
     if mode == "window":
         titles = set(data.get("target_windows", []))
-        titles.update(p.get("win_title") for p in fallback_actions if p.get("win_title"))
+        titles.update(p.get("win_title") for p in fallback_actions if isinstance(p, dict) and p.get("win_title"))
         window_map = wait_for_windows(sorted(titles), target_wait_seconds, log_path)
 
     actions = []
     for p in raw_actions:
+        if not isinstance(p, dict):
+            write_auto_log(log_path, f"skipped non-dict action: {type(p).__name__}")
+            continue
         normalize_mouse_action(p)
         ptype = p.get("type", "click")
         if ptype == "wait":
@@ -145,38 +148,45 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         write_auto_log(log_path, f"finished round {rounds}; clicks={clicks}")
         if not loop_enabled or (max_rounds > 0 and rounds >= max_rounds):
             break
+        sleep_until_deadline(0.001, deadline)
 
     write_auto_log(log_path, "auto run finished; exit=0")
     return 0
 
 
-def parse_args():
+def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="ClickTool Minified - A zero-dependency auto clicker")
     parser.add_argument("--auto", action="store_true", help="Run in auto mode using the provided config")
     parser.add_argument("--config", type=str, help="Path to the JSON config file (default: auto_config.json in app data)")
     parser.add_argument("--silent", action="store_true", help="Suppress console window in auto mode")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def _reexec_with_pythonw_if_needed():
+def _reexec_with_pythonw_if_needed(is_auto_mode: bool, argv: list[str]):
     """If running with python.exe (has console) and NOT in auto mode, re-exec with pythonw.exe."""
     executable = sys.executable
     if not executable.lower().endswith("python.exe"):
         return
 
-    if "--auto" in sys.argv:
+    if is_auto_mode:
         return
 
     pythonw = executable.lower().replace("python.exe", "pythonw.exe")
     if os.path.exists(pythonw):
         import subprocess
         # DETACHED_PROCESS = 0x00000008
-        subprocess.Popen([pythonw] + sys.argv, creationflags=0x00000008)
+        subprocess.Popen([pythonw] + argv, creationflags=0x00000008)
         sys.exit(0)
+    else:
+        # Fallback: hide console if pythonw.exe not found
+        try:
+            kernel32.FreeConsole()
+        except (AttributeError, OSError):
+            pass
 
 
-def main():
-    args = parse_args()
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
     enable_dpi_awareness()
 
     if args.auto:
@@ -196,7 +206,7 @@ def main():
         finally:
             release_single_instance_mutex(mutex)
     else:
-        _reexec_with_pythonw_if_needed()
+        _reexec_with_pythonw_if_needed(is_auto_mode=False, argv=argv if argv is not None else sys.argv)
 
         mutex = acquire_single_instance_mutex()
         if not mutex:
