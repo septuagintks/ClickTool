@@ -195,8 +195,8 @@ def normalize_script_data(data: dict) -> dict:
         hotkeys[action] = normalize_hotkey_text(hotkeys.get(action, default))
 
     for collection_name in ("screen_positions", "window_positions", "actions"):
-        coll = data.get(collection_name)
-        if coll is not None:
+        if collection_name in data:
+            coll = data[collection_name]
             if not isinstance(coll, list):
                 data[collection_name] = []
             else:
@@ -212,8 +212,8 @@ def normalize_script_data(data: dict) -> dict:
                                 action["win_title"] = str(wt)
 
     # Ensure target_windows is a list of strings
-    tw = data.get("target_windows")
-    if tw is not None:
+    if "target_windows" in data:
+        tw = data["target_windows"]
         if not isinstance(tw, list):
             data["target_windows"] = []
         else:
