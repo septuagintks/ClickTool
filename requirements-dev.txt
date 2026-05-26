@@ -1,0 +1,6 @@
+# Development dependencies for minified branch
+# Note: This branch has ZERO runtime dependencies
+# These are ONLY for testing and development
+
+pytest>=8.0
+pyflakes>=3.0
