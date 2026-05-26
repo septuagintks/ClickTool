@@ -155,9 +155,18 @@ def get_mouse_action_details(action: dict, title: str | None = None) -> str:
     return f"Delay: {action['ms']}ms"
 
 
-def normalize_script_data(data: dict) -> dict:
+def validate_script_shape(data: dict) -> None:
     if not isinstance(data, dict):
-        raise ValueError("Script data must be a dictionary")
+        raise ValueError("Script data must be a JSON object")
+
+    for collection_name in ("screen_positions", "window_positions", "actions", "target_windows"):
+        if collection_name in data:
+            if not isinstance(data[collection_name], list):
+                raise ValueError(f"Field '{collection_name}' must be a list")
+
+
+def normalize_script_data(data: dict) -> dict:
+    validate_script_shape(data)
 
     data["mode"] = infer_script_mode(data)
     if data["mode"] not in ("screen", "window"):
@@ -194,6 +203,16 @@ def normalize_script_data(data: dict) -> dict:
     for action, default in DEFAULT_HOTKEYS.items():
         hotkeys[action] = normalize_hotkey_text(hotkeys.get(action, default))
 
+    # Ensure target_windows is a list of strings
+    target_windows = []
+    if "target_windows" in data:
+        tw = data["target_windows"]
+        if not isinstance(tw, list):
+            data["target_windows"] = []
+        else:
+            data["target_windows"] = [str(s) for s in tw if s is not None and s != ""]
+            target_windows = data["target_windows"]
+
     for collection_name in ("screen_positions", "window_positions", "actions"):
         if collection_name in data:
             coll = data[collection_name]
@@ -211,13 +230,15 @@ def normalize_script_data(data: dict) -> dict:
                             else:
                                 action["win_title"] = str(wt)
 
-    # Ensure target_windows is a list of strings
-    if "target_windows" in data:
-        tw = data["target_windows"]
-        if not isinstance(tw, list):
-            data["target_windows"] = []
-        else:
-            data["target_windows"] = [str(s) for s in tw if s is not None and s != ""]
+                        # Validate window-mode actions require win_title
+                        is_window_action = (collection_name == "window_positions") or (collection_name == "actions" and data["mode"] == "window")
+                        if is_window_action and action.get("type", "click") != "wait":
+                            wt = action.get("win_title", "")
+                            if not wt:  # empty or missing
+                                if len(target_windows) == 1:
+                                    action["win_title"] = target_windows[0]
+                                else:
+                                    raise ValueError(f"Window action missing win_title in '{collection_name}'")
 
     return data
 

@@ -2568,27 +2568,9 @@ class ClickerApp:
             return
 
         try:
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                raw_data = json.load(f)
+            data = read_script_file(file_path)
         except Exception as e:
-            messagebox.showerror("Import Error", f"Failed to read JSON: {e}")
-            return
-
-        if not isinstance(raw_data, dict):
-            messagebox.showerror("Import Error", "Script data must be a JSON object")
-            return
-
-        # Perform strict shape validation on collection fields
-        for collection_name in ("screen_positions", "window_positions", "actions", "target_windows"):
-            if collection_name in raw_data:
-                if not isinstance(raw_data[collection_name], list):
-                    messagebox.showerror("Import Error", f"Field '{collection_name}' must be a list")
-                    return
-
-        try:
-            data = normalize_script_data(raw_data)
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Failed to normalize script data: {e}")
+            messagebox.showerror("Import Error", f"Failed to read script: {e}")
             return
 
         # Determine mode first so we know which fallback to apply
