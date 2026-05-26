@@ -196,7 +196,11 @@ def normalize_script_data(data: dict) -> dict:
                         normalize_mouse_action(action)
                         # Normalize win_title to string for window mode actions
                         if "win_title" in action:
-                            action["win_title"] = str(action["win_title"])
+                            wt = action["win_title"]
+                            if wt is None or wt == "":
+                                action["win_title"] = ""
+                            else:
+                                action["win_title"] = str(wt)
 
     # Ensure target_windows is a list of strings
     tw = data.get("target_windows")
@@ -204,7 +208,7 @@ def normalize_script_data(data: dict) -> dict:
         if not isinstance(tw, list):
             data["target_windows"] = []
         else:
-            data["target_windows"] = [str(s) for s in tw]
+            data["target_windows"] = [str(s) for s in tw if s is not None and s != ""]
 
     return data
 

@@ -2582,6 +2582,25 @@ class ClickerApp:
             messagebox.showerror("Import Error", "Invalid window_positions: all entries must be objects")
             return
 
+        # Validate action types and required fields
+        for p in screen_positions:
+            ptype = p.get("type", "click")
+            if ptype not in ("click", "double_click", "right_click", "wheel", "wait", "key"):
+                messagebox.showerror("Import Error", f"Invalid screen action type: {ptype}")
+                return
+            if ptype not in ("wait", "key") and ("x" not in p or "y" not in p):
+                messagebox.showerror("Import Error", f"Screen action type={ptype} missing x or y")
+                return
+
+        for p in window_positions:
+            ptype = p.get("type", "click")
+            if ptype not in ("click", "double_click", "right_click", "wheel", "wait", "key"):
+                messagebox.showerror("Import Error", f"Invalid window action type: {ptype}")
+                return
+            if ptype not in ("wait", "key") and ("x" not in p or "y" not in p):
+                messagebox.showerror("Import Error", f"Window action type={ptype} missing x or y")
+                return
+
         # Clear existing
         self.clear_screen_positions()
         self.clear_window_positions()
