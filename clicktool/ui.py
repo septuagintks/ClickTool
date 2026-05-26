@@ -2308,7 +2308,9 @@ class ClickerApp:
         hotkeys = settings.get("hotkeys", {})
         for action, default in DEFAULT_HOTKEYS.items():
             self.hotkey_vars[action].set(hotkeys.get(action, default))
-        self._apply_hotkeys(show_status=False)
+        if not self._apply_hotkeys(show_status=False):
+            messagebox.showerror("Import Error", "Failed to apply hotkeys: duplicate shortcuts detected. Hotkeys were not updated.")
+            return
 
         mode = infer_script_mode(data)
         self.notebook.select(0 if mode == "screen" else 1)

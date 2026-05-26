@@ -43,6 +43,8 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     mode = infer_script_mode(data)
     loop_enabled = coerce_bool(data.get("loop"), True)
     global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
+    settings = data.get("settings", {})
+    pure_background = settings.get("pure_background_window_click", False)
     auto = data.get("auto", {})
     timeout_seconds = coerce_non_negative_int(auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS)
     max_rounds = coerce_non_negative_int(auto.get("loop_max_rounds"), DEFAULT_AUTO_LOOP_MAX_ROUNDS)
@@ -63,6 +65,10 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         titles.discard(None)
         titles = sorted(titles)
         window_map = wait_for_windows(titles, target_wait_seconds, log_path)
+
+        # Auto-fill win_title if there's only one target window
+        default_win_title = titles[0] if len(titles) == 1 else None
+
         actions = []
         for p in raw_actions:
             if not isinstance(p, dict):
@@ -77,12 +83,14 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                 write_auto_log(log_path, f"unknown action type={ptype}; skipped")
                 continue
             entry = dict(p)
-            hwnd = window_map.get(p.get("win_title"))
+            win_title = p.get("win_title") or default_win_title
+            hwnd = window_map.get(win_title)
             if hwnd:
                 entry["hwnd"] = hwnd
+                entry["win_title"] = win_title
                 actions.append(entry)
             else:
-                write_auto_log(log_path, f"missing window position title={p.get('win_title')}")
+                write_auto_log(log_path, f"missing window position title={win_title}")
     else:
         actions = []
         for p in raw_actions:
@@ -134,7 +142,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
                         write_auto_log(log_path, f"re-resolved window '{title}' to HWND {hwnd}")
                 if hwnd and user32.IsWindow(hwnd):
                     if is_position_action(action):
-                        if perform_window_mouse_action(hwnd, action):
+                        if perform_window_mouse_action(hwnd, action, pure_background):
                             clicks += 1
                             write_auto_log(log_path, f"ran window action type={ptype} title={action.get('win_title')} x={action.get('x')} y={action.get('y')}")
                         else:
