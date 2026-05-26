@@ -2247,32 +2247,46 @@ class ClickerApp:
             allowed_types = POSITION_ACTION_TYPES | {"wait", "key"}
 
             # Validate screen positions
-            for p in data.get("screen_positions", []):
+            for i, p in enumerate(data.get("screen_positions", [])):
                 if not isinstance(p, dict):
                     raise ValueError("Invalid screen action: all entries must be objects")
                 ptype = p.get("type", "click")
                 if ptype not in allowed_types:
                     raise ValueError(f"Invalid screen action type: {ptype}")
-                if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
-                    raise ValueError(f"Screen action type={ptype} missing x or y")
+                if ptype in POSITION_ACTION_TYPES:
+                    if "x" not in p or "y" not in p:
+                        raise ValueError(f"Screen action #{i+1} type={ptype} missing x or y")
+                elif ptype == "wait":
+                    if "ms" not in p:
+                        raise ValueError(f"Screen action #{i+1} type=wait missing ms field")
+                elif ptype == "key":
+                    if "vk" not in p or "key_name" not in p:
+                        raise ValueError(f"Screen action #{i+1} type=key missing vk or key_name")
 
             # Validate window positions
             tw = data.get("target_windows", [])
-            for p in data.get("window_positions", []):
+            for i, p in enumerate(data.get("window_positions", [])):
                 if not isinstance(p, dict):
                     raise ValueError("Invalid window action: all entries must be objects")
                 ptype = p.get("type", "click")
                 if ptype not in allowed_types:
                     raise ValueError(f"Invalid window action type: {ptype}")
-                if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
-                    raise ValueError(f"Window action type={ptype} missing x or y")
-                if ptype != "wait":
+                if ptype in POSITION_ACTION_TYPES:
+                    if "x" not in p or "y" not in p:
+                        raise ValueError(f"Window action #{i+1} type={ptype} missing x or y")
                     wt = p.get("win_title")
                     if not wt:
                         if len(tw) == 1:
                             p["win_title"] = tw[0]
                         else:
-                            raise ValueError(f"Window action type={ptype} missing win_title")
+                            raise ValueError(f"Window action #{i+1} type={ptype} missing win_title")
+                elif ptype == "wait":
+                    if "ms" not in p:
+                        raise ValueError(f"Window action #{i+1} type=wait missing ms field")
+                elif ptype == "key":
+                    if "vk" not in p or "key_name" not in p:
+                        raise ValueError(f"Window action #{i+1} type=key missing vk or key_name")
+                    # Key actions can optionally have win_title, but it's not required
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to validate script data: {e}")
             return
