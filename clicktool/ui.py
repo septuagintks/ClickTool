@@ -2241,7 +2241,41 @@ class ClickerApp:
 
     def apply_script_data(self, data: dict, source_path: str | None = None, show_warnings: bool = True) -> None:
         """Load script JSON data into the GUI."""
-        normalize_script_data(data)
+        try:
+            normalize_script_data(data)
+
+            allowed_types = POSITION_ACTION_TYPES | {"wait", "key"}
+
+            # Validate screen positions
+            for p in data.get("screen_positions", []):
+                if not isinstance(p, dict):
+                    raise ValueError("Invalid screen action: all entries must be objects")
+                ptype = p.get("type", "click")
+                if ptype not in allowed_types:
+                    raise ValueError(f"Invalid screen action type: {ptype}")
+                if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
+                    raise ValueError(f"Screen action type={ptype} missing x or y")
+
+            # Validate window positions
+            tw = data.get("target_windows", [])
+            for p in data.get("window_positions", []):
+                if not isinstance(p, dict):
+                    raise ValueError("Invalid window action: all entries must be objects")
+                ptype = p.get("type", "click")
+                if ptype not in allowed_types:
+                    raise ValueError(f"Invalid window action type: {ptype}")
+                if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
+                    raise ValueError(f"Window action type={ptype} missing x or y")
+                if ptype != "wait":
+                    wt = p.get("win_title")
+                    if not wt:
+                        if len(tw) == 1:
+                            p["win_title"] = tw[0]
+                        else:
+                            raise ValueError(f"Window action type={ptype} missing win_title")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to validate script data: {e}")
+            return
 
         self.clear_screen_positions()
         self.clear_window_positions()
