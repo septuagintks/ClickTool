@@ -52,6 +52,22 @@ def coerce_int_or(value, default):
             return default
 
 
+def coerce_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off"):
+            return False
+    return default
+
+
 def infer_script_mode(data: dict) -> str:
     mode = data.get("mode")
     if mode:
@@ -87,7 +103,7 @@ def normalize_mouse_action(action: dict) -> dict:
     elif action_type == "key":
         action["vk"] = coerce_int_or(action.get("vk"), 0)
         action["scan_code"] = coerce_int_or(action.get("scan_code"), 0)
-        action["extended"] = bool(action.get("extended", False))
+        action["extended"] = coerce_bool(action.get("extended"), False)
         action["key_name"] = str(action.get("key_name") or "")
         raw_mods = action.get("modifiers") or []
         if isinstance(raw_mods, str):
@@ -172,12 +188,16 @@ def normalize_script_data(data: dict) -> dict:
     if data["mode"] not in ("screen", "window"):
         data["mode"] = "screen"
 
+    data["loop"] = coerce_bool(data.get("loop"), True)
+
     settings = data.setdefault("settings", {})
     if not isinstance(settings, dict):
         settings = data["settings"] = {}
 
     settings["window_client_area_only"] = True
-    settings["enable_global_hotkeys"] = bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
+    settings["enable_global_hotkeys"] = coerce_bool(
+        settings.get("enable_global_hotkeys"), DEFAULT_ENABLE_GLOBAL_HOTKEYS
+    )
     settings["default_wait_ms"] = coerce_non_negative_int(
         settings.get("default_wait_ms"), DEFAULT_WAIT_MS
     )
