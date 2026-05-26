@@ -69,6 +69,12 @@ def infer_script_mode(data: dict) -> str:
         return "window"
     if data.get("target_windows"):
         return "window"
+    # Check if any action has win_title
+    actions = data.get("actions", [])
+    if isinstance(actions, list):
+        for action in actions:
+            if isinstance(action, dict) and action.get("win_title"):
+                return "window"
     return "screen"
 
 
@@ -177,7 +183,7 @@ def normalize_script_data(data: dict) -> dict:
     if "pure_background_window_click" not in settings and "window_client_area_only" in settings:
         settings["pure_background_window_click"] = coerce_bool(settings["window_client_area_only"], DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
     settings.pop("window_client_area_only", None)
-    settings.setdefault("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
+    settings["pure_background_window_click"] = coerce_bool(settings.get("pure_background_window_click"), DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
     settings["enable_global_hotkeys"] = coerce_bool(settings.get("enable_global_hotkeys"), DEFAULT_ENABLE_GLOBAL_HOTKEYS)
     settings["default_wait_ms"] = coerce_non_negative_int(
         settings.get("default_wait_ms"), DEFAULT_WAIT_MS

@@ -2291,13 +2291,30 @@ class ClickerApp:
             messagebox.showerror("Import Error", f"Failed to validate script data: {e}")
             return
 
+        # Validate hotkeys before clearing any state
+        settings = data.get("settings", {})
+        hotkeys = settings.get("hotkeys", {})
+        temp_hotkey_vars = {}
+        for action, default in DEFAULT_HOTKEYS.items():
+            temp_hotkey_vars[action] = hotkeys.get(action, default)
+
+        # Check for duplicate hotkeys without modifying state
+        seen: dict[str, str] = {}
+        for action, label in HOTKEY_ACTIONS:
+            hotkey = normalize_hotkey_text(temp_hotkey_vars[action])
+            if not hotkey:
+                continue
+            if hotkey in seen:
+                messagebox.showerror("Import Error", f"Duplicate shortcuts detected: {label} and {seen[hotkey]} both use {hotkey}. Import aborted.")
+                return
+            seen[hotkey] = label
+
         self.clear_screen_positions()
         self.clear_window_positions()
         self._target_windows.clear()
 
         self.interval_var.set(data.get("global_interval", "500"))
         self.loop_var.set(data.get("loop", True))
-        settings = data.get("settings", {})
         self.pure_background_window_click_var.set(
             settings.get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
         )
@@ -2305,12 +2322,9 @@ class ClickerApp:
             coerce_bool(settings.get("enable_global_hotkeys"), DEFAULT_ENABLE_GLOBAL_HOTKEYS)
         )
         self.default_wait_var.set(str(settings.get("default_wait_ms", DEFAULT_WAIT_MS)))
-        hotkeys = settings.get("hotkeys", {})
         for action, default in DEFAULT_HOTKEYS.items():
             self.hotkey_vars[action].set(hotkeys.get(action, default))
-        if not self._apply_hotkeys(show_status=False):
-            messagebox.showerror("Import Error", "Failed to apply hotkeys: duplicate shortcuts detected. Hotkeys were not updated.")
-            return
+        self._apply_hotkeys(show_status=False)
 
         mode = infer_script_mode(data)
         self.notebook.select(0 if mode == "screen" else 1)
