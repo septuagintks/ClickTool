@@ -3,4 +3,3 @@
 # These are ONLY for testing and development
 
 pytest>=8.0
-pyflakes>=3.0

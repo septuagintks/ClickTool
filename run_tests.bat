@@ -1,6 +1,6 @@
 @echo off
 REM Click Tool Minified - One-Click Test Runner
-REM Activates venv and runs pytest with coverage
+REM Automatically sets up venv and runs pytest
 
 setlocal
 
@@ -9,24 +9,32 @@ echo Click Tool Minified Test Suite
 echo ========================================
 echo.
 
-REM Check if venv exists
+REM Check if venv exists, create if not
 if not exist ".venv\Scripts\activate.bat" (
-    echo [ERROR] Virtual environment not found at .venv
-    echo Please create it first: python -m venv .venv
-    echo Then install dependencies: .venv\Scripts\pip install -r requirements-dev.txt
-    exit /b 1
+    echo [INFO] Virtual environment not found, creating...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment
+        echo Make sure Python is installed and in PATH
+        exit /b 1
+    )
+    echo [SUCCESS] Virtual environment created
 )
 
 REM Activate virtual environment
 echo [INFO] Activating virtual environment...
 call .venv\Scripts\activate.bat
 
-REM Check if pytest is installed
+REM Check if pytest is installed, install if not
 python -c "import pytest" 2>nul
 if errorlevel 1 (
-    echo [ERROR] pytest not found in virtual environment
-    echo Please install dev dependencies: pip install -r requirements-dev.txt
-    exit /b 1
+    echo [INFO] pytest not found, installing dev dependencies...
+    python -m pip install -r requirements-dev.txt
+    if errorlevel 1 (
+        echo [ERROR] Failed to install dev dependencies
+        exit /b 1
+    )
+    echo [SUCCESS] Dev dependencies installed
 )
 
 REM Verify zero runtime dependencies
