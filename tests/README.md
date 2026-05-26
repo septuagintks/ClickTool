@@ -7,7 +7,7 @@ This document describes the test suite structure and testing strategy for the Cl
 **The minified branch has ZERO runtime dependencies.** All Windows API interactions use `ctypes` (Python stdlib), not `pywin32`.
 
 - ✅ Runtime: Pure Python + ctypes
-- ✅ Testing: pytest + pyflakes (dev-only)
+- ✅ Testing: pytest (dev-only)
 - ❌ Never import: pywin32, win32api, win32con, win32gui
 
 ## Test Structure
@@ -32,7 +32,7 @@ click-tool-minified-dev/
 │   └── README.md           # This file
 ├── clicktoolm.py            # Entry point
 ├── requirements.txt         # EMPTY (zero runtime dependencies)
-├── requirements-dev.txt     # pytest + pyflakes (dev-only)
+├── requirements-dev.txt     # pytest (dev-only)
 └── run_tests.bat            # One-click test runner
 ```
 
@@ -123,7 +123,7 @@ python -m venv .venv
 # Activate it
 .venv\Scripts\activate
 
-# Install dev dependencies (pytest + pyflakes ONLY)
+# Install dev dependencies (pytest ONLY)
 pip install -r requirements-dev.txt
 ```
 
