@@ -67,7 +67,9 @@ def infer_script_mode(data: dict) -> str:
         return data["mode"]
     if data.get("window_positions"):
         return "window"
-    if data.get("target_windows"):
+    # Only treat target_windows as window signal if it's a non-empty list
+    tw = data.get("target_windows")
+    if isinstance(tw, list) and len(tw) > 0:
         return "window"
     # Check if any action has win_title
     actions = data.get("actions", [])
