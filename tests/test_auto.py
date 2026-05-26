@@ -1,6 +1,7 @@
 """Unit tests for the auto-run entry point."""
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ def load_entry_module():
     return module
 
 
+@unittest.skipIf(sys.platform != "win32", "Windows-only tests")
 class TestRunAutoConfig(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
