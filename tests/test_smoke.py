@@ -10,17 +10,20 @@ import sys
 import os
 import tempfile
 import json
+import importlib.util
 
 
 class TestImportSmoke(unittest.TestCase):
     """Test that all modules can be imported without errors."""
 
-    def test_import_main_module(self):
-        """Main clicktool.py should be importable."""
+    def test_import_entry_point(self):
+        """Entry point clicktool.py should be importable."""
         try:
-            import clicktool
-        except ImportError as e:
-            self.fail(f"Failed to import clicktool: {e}")
+            spec = importlib.util.spec_from_file_location("clicktool_entry", "clicktool.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception as e:
+            self.fail(f"Failed to import clicktool.py entry point: {e}")
 
     def test_import_script_module(self):
         """clicktool.script should be importable."""
@@ -85,13 +88,18 @@ class TestCLISmoke(unittest.TestCase):
     def test_nonexistent_config_returns_error(self):
         """Running with nonexistent config should return error exit code."""
         import subprocess
-        result = subprocess.run(
-            [sys.executable, "clicktool.py", "auto", "nonexistent_config.json"],
-            capture_output=True,
-            timeout=5
-        )
-        # Should exit with error code (not 0)
-        self.assertNotEqual(result.returncode, 0)
+        # Use isolated temp directory to avoid real user logs/locks
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env['LOCALAPPDATA'] = tmpdir
+            result = subprocess.run(
+                [sys.executable, "clicktool.py", "--auto", "--config", "nonexistent_config.json"],
+                capture_output=True,
+                timeout=5,
+                env=env
+            )
+            # Should exit with error code 2 (file not found)
+            self.assertEqual(result.returncode, 2)
 
     def test_invalid_json_config_returns_error(self):
         """Running with invalid JSON should return error exit code."""
@@ -101,13 +109,17 @@ class TestCLISmoke(unittest.TestCase):
             temp_path = f.name
 
         try:
-            result = subprocess.run(
-                [sys.executable, "clicktool.py", "auto", temp_path],
-                capture_output=True,
-                timeout=5
-            )
-            # Should exit with error code
-            self.assertNotEqual(result.returncode, 0)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env = os.environ.copy()
+                env['LOCALAPPDATA'] = tmpdir
+                result = subprocess.run(
+                    [sys.executable, "clicktool.py", "--auto", "--config", temp_path],
+                    capture_output=True,
+                    timeout=5,
+                    env=env
+                )
+                # Should exit with error code 2 (JSON decode error)
+                self.assertEqual(result.returncode, 2)
         finally:
             os.unlink(temp_path)
 
@@ -119,13 +131,17 @@ class TestCLISmoke(unittest.TestCase):
             temp_path = f.name
 
         try:
-            result = subprocess.run(
-                [sys.executable, "clicktool.py", "auto", temp_path],
-                capture_output=True,
-                timeout=5
-            )
-            # Should exit with error code (no actions to execute)
-            self.assertNotEqual(result.returncode, 0)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env = os.environ.copy()
+                env['LOCALAPPDATA'] = tmpdir
+                result = subprocess.run(
+                    [sys.executable, "clicktool.py", "--auto", "--config", temp_path],
+                    capture_output=True,
+                    timeout=5,
+                    env=env
+                )
+                # Should exit with error code 3 (no runnable actions)
+                self.assertEqual(result.returncode, 3)
         finally:
             os.unlink(temp_path)
 
