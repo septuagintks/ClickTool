@@ -226,6 +226,7 @@ class ClickerApp:
         self._sync_dots_after_id: str | None = None
 
         self._build_ui()
+        self._set_button_controls_enabled(False)
         self._apply_hotkeys(show_status=False)
         self.sync_dots_loop()
         self.root.bind_all("<KeyPress>", self._on_key_press, add="+")
