@@ -94,6 +94,17 @@ class TestInferScriptMode(unittest.TestCase):
         data = {"actions": [{"type": "click", "x": 100, "y": 200, "win_title": "Notepad"}]}
         self.assertEqual(infer_script_mode(data), "window")
 
+    def test_target_windows_infers_window_mode(self):
+        # Non-empty list of target_windows infers window mode
+        data = {"target_windows": ["Notepad"]}
+        self.assertEqual(infer_script_mode(data), "window")
+
+    def test_target_windows_empty_or_invalid_infers_screen(self):
+        # Empty list or invalid types don't infer window mode
+        self.assertEqual(infer_script_mode({"target_windows": []}), "screen")
+        self.assertEqual(infer_script_mode({"target_windows": "Notepad"}), "screen")
+        self.assertEqual(infer_script_mode({"target_windows": None}), "screen")
+
     def test_default_to_screen(self):
         self.assertEqual(infer_script_mode({}), "screen")
 

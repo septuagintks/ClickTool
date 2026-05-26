@@ -17,13 +17,14 @@ import json
 class TestZeroRuntimeDependencies(unittest.TestCase):
     """Verify that the minified branch has zero runtime dependencies."""
 
-    def test_no_pywin32_import(self):
-        """Ensure pywin32 is NOT imported in source code."""
+    def test_no_pywin32_import_via_ast(self):
+        """Ensure pywin32 is NOT imported in source code using AST parsing."""
+        import ast
         clicktool_min_dir = os.path.join(os.path.dirname(__file__), "..", "clicktool_min")
         if not os.path.exists(clicktool_min_dir):
             self.skipTest("clicktool_min directory not found")
 
-        forbidden_imports = ["win32api", "win32con", "win32gui", "pywintypes"]
+        forbidden_modules = ["win32api", "win32con", "win32gui", "pywintypes"]
 
         for filename in os.listdir(clicktool_min_dir):
             if not filename.endswith(".py") or filename.startswith("__"):
@@ -31,14 +32,38 @@ class TestZeroRuntimeDependencies(unittest.TestCase):
 
             filepath = os.path.join(clicktool_min_dir, filename)
             with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
+                try:
+                    tree = ast.parse(f.read(), filename=filename)
+                except SyntaxError:
+                    continue  # Skip files with syntax errors
 
-            for forbidden in forbidden_imports:
-                with self.subTest(file=filename, import_name=forbidden):
-                    self.assertNotIn(f"import {forbidden}", content,
-                                   f"{filename} imports {forbidden} - violates zero dependency rule")
-                    self.assertNotIn(f"from {forbidden}", content,
-                                   f"{filename} imports from {forbidden} - violates zero dependency rule")
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        with self.subTest(file=filename, import_type="import", module=alias.name):
+                            self.assertNotIn(alias.name, forbidden_modules,
+                                           f"{filename} imports {alias.name} - violates zero dependency rule")
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        with self.subTest(file=filename, import_type="from", module=node.module):
+                            self.assertNotIn(node.module, forbidden_modules,
+                                           f"{filename} imports from {node.module} - violates zero dependency rule")
+
+    def test_clean_subprocess_import(self):
+        """Verify modules can be imported in a clean subprocess without external dependencies."""
+        import subprocess
+        # Use -S to skip site-packages, ensuring only stdlib is available
+        result = subprocess.run(
+            [sys.executable, "-S", "-c",
+             "import sys; sys.path.insert(0, '.'); "
+             "from clicktool_min import script, window, hotkey, winapi"],
+            capture_output=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            self.fail(f"Failed to import clicktool_min in clean subprocess:\n"
+                     f"stdout: {result.stdout.decode()}\n"
+                     f"stderr: {result.stderr.decode()}")
 
     def test_ctypes_only_for_windows_api(self):
         """Verify that only ctypes (stdlib) is used for Windows API."""
@@ -135,13 +160,18 @@ class TestCLISmoke(unittest.TestCase):
     def test_nonexistent_config_returns_error(self):
         """Running with nonexistent config should return error exit code."""
         import subprocess
-        result = subprocess.run(
-            [sys.executable, "clicktoolm.py", "auto", "nonexistent_config.json"],
-            capture_output=True,
-            timeout=5
-        )
-        # Should exit with error code (not 0)
-        self.assertNotEqual(result.returncode, 0)
+        # Use isolated temp directory to avoid real user logs/locks
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env['LOCALAPPDATA'] = tmpdir
+            result = subprocess.run(
+                [sys.executable, "clicktoolm.py", "--auto", "--config", "nonexistent_config.json"],
+                capture_output=True,
+                timeout=5,
+                env=env
+            )
+            # Should exit with error code 2 (file not found)
+            self.assertEqual(result.returncode, 2)
 
     def test_invalid_json_config_returns_error(self):
         """Running with invalid JSON should return error exit code."""
@@ -151,13 +181,39 @@ class TestCLISmoke(unittest.TestCase):
             temp_path = f.name
 
         try:
-            result = subprocess.run(
-                [sys.executable, "clicktoolm.py", "auto", temp_path],
-                capture_output=True,
-                timeout=5
-            )
-            # Should exit with error code
-            self.assertNotEqual(result.returncode, 0)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env = os.environ.copy()
+                env['LOCALAPPDATA'] = tmpdir
+                result = subprocess.run(
+                    [sys.executable, "clicktoolm.py", "--auto", "--config", temp_path],
+                    capture_output=True,
+                    timeout=5,
+                    env=env
+                )
+                # Should exit with error code 2 (JSON decode error)
+                self.assertEqual(result.returncode, 2)
+        finally:
+            os.unlink(temp_path)
+
+    def test_empty_config_returns_error(self):
+        """Running with empty config should return error exit code."""
+        import subprocess
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({}, f)
+            temp_path = f.name
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env = os.environ.copy()
+                env['LOCALAPPDATA'] = tmpdir
+                result = subprocess.run(
+                    [sys.executable, "clicktoolm.py", "--auto", "--config", temp_path],
+                    capture_output=True,
+                    timeout=5,
+                    env=env
+                )
+                # Should exit with error code 3 (no runnable actions)
+                self.assertEqual(result.returncode, 3)
         finally:
             os.unlink(temp_path)
 
@@ -175,42 +231,6 @@ class TestDependencySmoke(unittest.TestCase):
             self.assertIsNotNone(user32)
         except Exception as e:
             self.fail(f"ctypes.windll not available: {e}")
-
-    def test_no_external_dependencies_in_stdlib(self):
-        """Verify all imports are from stdlib or local modules."""
-        import sys
-        import importlib
-
-        # Import all modules
-        from clicktool_min import script, window, hotkey, winapi
-
-        # Check that no third-party packages are loaded
-        third_party_packages = []
-        for module_name in sys.modules:
-            # Skip builtins, stdlib, and our own modules
-            if module_name.startswith(('_', 'clicktool_min', 'tests')):
-                continue
-            if '.' in module_name:
-                root = module_name.split('.')[0]
-            else:
-                root = module_name
-
-            # Check if it's a stdlib module
-            try:
-                spec = importlib.util.find_spec(root)
-                if spec and spec.origin:
-                    # Stdlib modules are in Python's lib directory
-                    if 'site-packages' in spec.origin:
-                        third_party_packages.append(root)
-            except (ImportError, AttributeError, ValueError):
-                pass
-
-        # Filter out pytest and test-related packages
-        third_party_packages = [p for p in third_party_packages
-                               if not p.startswith(('pytest', '_pytest', 'pluggy', 'py'))]
-
-        if third_party_packages:
-            self.fail(f"Third-party packages detected: {third_party_packages}")
 
 
 class TestConfigValidationSmoke(unittest.TestCase):

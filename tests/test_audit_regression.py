@@ -89,12 +89,46 @@ class TestModeInferenceEdgeCases(unittest.TestCase):
         self.assertEqual(infer_script_mode(data), "window")
 
     def test_window_positions_takes_precedence(self):
-        """window_positions is checked before actions."""
+        """window_positions is checked before target_windows."""
         data = {
             "window_positions": [{"x": 100, "y": 200}],
-            "actions": [{"x": 300, "y": 400}]  # No win_title
+            "target_windows": []  # Empty, but window_positions exists
         }
         self.assertEqual(infer_script_mode(data), "window")
+
+    def test_target_windows_with_actions_infers_window(self):
+        """
+        Bug: Configs with target_windows + actions (no window_positions) were
+        misidentified as screen mode in minified branch.
+
+        Fix: infer_script_mode now checks target_windows in addition to window_positions.
+        """
+        data = {
+            "target_windows": ["Notepad"],
+            "actions": [
+                {"type": "click", "x": 100, "y": 200}
+            ]
+        }
+        self.assertEqual(infer_script_mode(data), "window")
+
+    def test_target_windows_string_type_trap(self):
+        """
+        Bug: target_windows: "Notepad" (string instead of list) was incorrectly
+        triggering window mode, then normalized to empty list, causing exit 3.
+
+        Fix: infer_script_mode now validates target_windows is a non-empty list.
+        """
+        # String type should not trigger window mode
+        data = {"target_windows": "Notepad", "actions": [{"x": 100, "y": 200}]}
+        self.assertEqual(infer_script_mode(data), "screen")
+
+        # None should not trigger window mode
+        data = {"target_windows": None, "actions": [{"x": 100, "y": 200}]}
+        self.assertEqual(infer_script_mode(data), "screen")
+
+        # Empty list should not trigger window mode
+        data = {"target_windows": [], "actions": [{"x": 100, "y": 200}]}
+        self.assertEqual(infer_script_mode(data), "screen")
 
     def test_mixed_actions_with_and_without_win_title(self):
         """Actions with at least one win_title should infer window mode."""
