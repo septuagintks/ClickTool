@@ -10,7 +10,7 @@ from clicktool.paths import (
     show_already_running_message,
 )
 from clicktool.script import (
-    coerce_non_negative_int, infer_script_mode,
+    coerce_non_negative_int, coerce_bool, infer_script_mode,
     is_position_action, normalize_mouse_action, read_script_file,
     DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS, DEFAULT_AUTO_LOOP_MAX_ROUNDS,
     DEFAULT_TARGET_WAIT_SECONDS,
@@ -41,7 +41,7 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
         return 2
 
     mode = infer_script_mode(data)
-    loop_enabled = bool(data.get("loop", True))
+    loop_enabled = coerce_bool(data.get("loop"), True)
     global_interval_ms = coerce_non_negative_int(data.get("global_interval"), 500)
     auto = data.get("auto", {})
     timeout_seconds = coerce_non_negative_int(auto.get("loop_timeout_seconds"), DEFAULT_AUTO_LOOP_TIMEOUT_SECONDS)
@@ -58,11 +58,16 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
 
     if mode == "window":
         titles = set(data.get("target_windows", []))
-        titles.update(p.get("win_title") for p in fallback_actions if p.get("win_title"))
+        titles.update(p.get("win_title") for p in fallback_actions if isinstance(p, dict) and p.get("win_title"))
+        titles.update(p.get("win_title") for p in raw_actions if isinstance(p, dict) and p.get("win_title"))
+        titles.discard(None)
         titles = sorted(titles)
         window_map = wait_for_windows(titles, target_wait_seconds, log_path)
         actions = []
         for p in raw_actions:
+            if not isinstance(p, dict):
+                write_auto_log(log_path, f"invalid action (not a dict): {type(p).__name__}; skipped")
+                continue
             normalize_mouse_action(p)
             ptype = p.get("type", "click")
             if ptype == "wait":
@@ -81,6 +86,9 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     else:
         actions = []
         for p in raw_actions:
+            if not isinstance(p, dict):
+                write_auto_log(log_path, f"invalid action (not a dict): {type(p).__name__}; skipped")
+                continue
             normalize_mouse_action(p)
             ptype = p.get("type", "click")
             if ptype == "wait":

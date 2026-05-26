@@ -23,7 +23,7 @@ from .script import (
     DEFAULT_TARGET_WAIT_SECONDS, DEFAULT_PURE_BACKGROUND_WINDOW_CLICK,
     DEFAULT_INTERVAL_MS, DEFAULT_WAIT_MS, DEFAULT_ENABLE_GLOBAL_HOTKEYS,
     POSITION_ACTION_TYPES, MOUSE_BUTTONS, KEY_MODIFIERS,
-    coerce_non_negative_int, infer_script_mode, is_position_action, normalize_mouse_action,
+    coerce_non_negative_int, coerce_bool, infer_script_mode, is_position_action, normalize_mouse_action,
     coerce_wheel_delta, get_mouse_action_name, get_mouse_action_details,
     format_key_combo,
     normalize_script_data, read_script_file, write_script_file,
@@ -2302,7 +2302,7 @@ class ClickerApp:
             settings.get("pure_background_window_click", DEFAULT_PURE_BACKGROUND_WINDOW_CLICK)
         )
         self.enable_global_hotkeys_var.set(
-            bool(settings.get("enable_global_hotkeys", DEFAULT_ENABLE_GLOBAL_HOTKEYS))
+            coerce_bool(settings.get("enable_global_hotkeys"), DEFAULT_ENABLE_GLOBAL_HOTKEYS)
         )
         self.default_wait_var.set(str(settings.get("default_wait_ms", DEFAULT_WAIT_MS)))
         hotkeys = settings.get("hotkeys", {})
