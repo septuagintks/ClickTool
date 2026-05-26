@@ -60,7 +60,7 @@ def infer_script_mode(data: dict) -> str:
         return "window"
     # Check actions for win_title to determine window mode
     actions = data.get("actions", [])
-    if any(isinstance(a, dict) and a.get("win_title") for a in actions):
+    if isinstance(actions, list) and any(isinstance(a, dict) and a.get("win_title") for a in actions):
         return "window"
     return "screen"
 
