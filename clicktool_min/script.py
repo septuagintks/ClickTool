@@ -53,7 +53,16 @@ def coerce_int_or(value, default):
 
 
 def infer_script_mode(data: dict) -> str:
-    return data.get("mode") or ("window" if data.get("window_positions") else "screen")
+    mode = data.get("mode")
+    if mode:
+        return mode
+    if data.get("window_positions"):
+        return "window"
+    # Check actions for win_title to determine window mode
+    actions = data.get("actions", [])
+    if any(isinstance(a, dict) and a.get("win_title") for a in actions):
+        return "window"
+    return "screen"
 
 
 def is_position_action(action: dict) -> bool:

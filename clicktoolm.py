@@ -56,7 +56,13 @@ def run_auto_config(config_path: str, log_path: str | None = None) -> int:
     window_map = {}
     if mode == "window":
         titles = set(data.get("target_windows", []))
-        titles.update(p.get("win_title") for p in fallback_actions if isinstance(p, dict) and p.get("win_title"))
+        # Collect titles from both raw_actions and fallback_actions
+        for p in raw_actions:
+            if isinstance(p, dict) and p.get("win_title"):
+                titles.add(p["win_title"])
+        for p in fallback_actions:
+            if isinstance(p, dict) and p.get("win_title"):
+                titles.add(p["win_title"])
         window_map = wait_for_windows(sorted(titles), target_wait_seconds, log_path)
 
     actions = []

@@ -2583,21 +2583,24 @@ class ClickerApp:
             return
 
         # Validate action types and required fields
+        from clicktool_min.script import POSITION_ACTION_TYPES
+        allowed_types = POSITION_ACTION_TYPES | {"wait", "key"}
+
         for p in screen_positions:
             ptype = p.get("type", "click")
-            if ptype not in ("click", "double_click", "right_click", "wheel", "wait", "key"):
+            if ptype not in allowed_types:
                 messagebox.showerror("Import Error", f"Invalid screen action type: {ptype}")
                 return
-            if ptype not in ("wait", "key") and ("x" not in p or "y" not in p):
+            if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
                 messagebox.showerror("Import Error", f"Screen action type={ptype} missing x or y")
                 return
 
         for p in window_positions:
             ptype = p.get("type", "click")
-            if ptype not in ("click", "double_click", "right_click", "wheel", "wait", "key"):
+            if ptype not in allowed_types:
                 messagebox.showerror("Import Error", f"Invalid window action type: {ptype}")
                 return
-            if ptype not in ("wait", "key") and ("x" not in p or "y" not in p):
+            if ptype in POSITION_ACTION_TYPES and ("x" not in p or "y" not in p):
                 messagebox.showerror("Import Error", f"Window action type={ptype} missing x or y")
                 return
 
@@ -2621,8 +2624,15 @@ class ClickerApp:
             self.hotkey_vars[action].set(hotkeys.get(action, default))
         self._apply_hotkeys(show_status=False)
 
+        # Determine mode and use actions as fallback if position arrays are empty
+        mode = data.get("mode") or ("window" if data.get("window_positions") or data.get("target_windows") else "screen")
+        actions = data.get("actions", [])
+
         # Restore screen positions
-        for p_data in data.get("screen_positions", []):
+        screen_positions_to_restore = data.get("screen_positions", [])
+        if not screen_positions_to_restore and mode == "screen" and actions:
+            screen_positions_to_restore = actions
+        for p_data in screen_positions_to_restore:
             self._restore_screen_position(p_data)
         self._refresh_screen_list()
 
@@ -2645,7 +2655,10 @@ class ClickerApp:
         self._refresh_window_list()
 
         # Restore window positions
-        for p_data in data.get("window_positions", []):
+        window_positions_to_restore = data.get("window_positions", [])
+        if not window_positions_to_restore and mode == "window" and actions:
+            window_positions_to_restore = actions
+        for p_data in window_positions_to_restore:
             self._restore_window_position(p_data)
         self._refresh_window_pt_list()
 
