@@ -2572,6 +2572,16 @@ class ClickerApp:
             messagebox.showerror("Import Error", f"Failed to read script: {e}")
             return
 
+        # Validate all positions are dicts before clearing
+        screen_positions = data.get("screen_positions", [])
+        window_positions = data.get("window_positions", [])
+        if not all(isinstance(p, dict) for p in screen_positions):
+            messagebox.showerror("Import Error", "Invalid screen_positions: all entries must be objects")
+            return
+        if not all(isinstance(p, dict) for p in window_positions):
+            messagebox.showerror("Import Error", "Invalid window_positions: all entries must be objects")
+            return
+
         # Clear existing
         self.clear_screen_positions()
         self.clear_window_positions()

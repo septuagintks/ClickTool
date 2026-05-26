@@ -194,6 +194,9 @@ def normalize_script_data(data: dict) -> dict:
                 for action in coll:
                     if isinstance(action, dict):
                         normalize_mouse_action(action)
+                        # Normalize win_title to string for window mode actions
+                        if "win_title" in action:
+                            action["win_title"] = str(action["win_title"])
 
     # Ensure target_windows is a list of strings
     tw = data.get("target_windows")
