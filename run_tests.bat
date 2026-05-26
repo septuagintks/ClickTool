@@ -21,15 +21,14 @@ if not exist ".venv\Scripts\activate.bat" (
     echo [SUCCESS] Virtual environment created
 )
 
-REM Activate virtual environment
-echo [INFO] Activating virtual environment...
-call .venv\Scripts\activate.bat
+REM Use venv Python directly (don't rely on activate.bat which may have stale paths)
+set VENV_PYTHON=.venv\Scripts\python.exe
 
 REM Check if pytest is installed, install if not
-python -c "import pytest" 2>nul
+%VENV_PYTHON% -c "import pytest" 2>nul
 if errorlevel 1 (
     echo [INFO] pytest not found, installing dev dependencies...
-    python -m pip install -r requirements-dev.txt
+    %VENV_PYTHON% -m pip install -r requirements-dev.txt
     if errorlevel 1 (
         echo [ERROR] Failed to install dev dependencies
         exit /b 1
@@ -39,7 +38,7 @@ if errorlevel 1 (
 
 REM Verify zero runtime dependencies
 echo [INFO] Verifying zero runtime dependencies...
-python -c "import sys; sys.path.insert(0, '.'); import clicktool_min.script" 2>nul
+%VENV_PYTHON% -c "import sys; sys.path.insert(0, '.'); import clicktool_min.script" 2>nul
 if errorlevel 1 (
     echo [ERROR] Failed to import clicktool_min without external dependencies
     exit /b 1
@@ -49,7 +48,7 @@ echo [OK] Zero runtime dependencies verified
 REM Run tests
 echo [INFO] Running test suite...
 echo.
-python -m pytest tests/ -v --tb=short
+%VENV_PYTHON% -m pytest tests/ -v --tb=short
 
 set TEST_EXIT_CODE=%errorlevel%
 
